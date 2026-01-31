@@ -80,23 +80,15 @@ const generateNewAlias = (
         if (location.city) parts.push(location.city);
     }
 
-    // 2. Add Custom Base Name (User Defined)
-    if (options.customBaseName) {
-        parts.push(options.customBaseName);
-    } 
-    // If NO location and NO custom name, strictly keep generic fallback, DO NOT use original name
-    else if (!location) {
-        parts.push("Server");
-    }
+    // 2. Add Custom Base Name (User Defined or Default "VS")
+    const baseName = options.customBaseName && options.customBaseName.trim() !== ''
+        ? options.customBaseName.trim()
+        : 'VS';
+    parts.push(baseName);
 
-    // 3. Add Index (Always or if required)
-    // The user requested removing old name entirely.
-    // Adding index is good practice to avoid duplicates.
-    parts.push(`#${index + 1}`);
+    // 3. Add Index (Just the number as requested)
+    parts.push(`${index + 1}`);
 
-    // If Mux/Frag is enabled, maybe append small tag? 
-    // User asked to clean up names, so let's keep it minimal as requested.
-    
     return parts.join(' ');
 };
 
@@ -119,7 +111,8 @@ const processVmess = (link: string, options: ProcessingOptions, index: number, l
 
     // Apply Mux
     if (options.enableMux) {
-      // config.ps = `${config.ps} | Mux`; // REMOVED per request
+       // Mux logic usually handled by client, but we can tag if needed. 
+       // Keeping clean as per request.
     }
 
     // Allow Insecure
@@ -242,7 +235,6 @@ const processUrlBased = (link: string, options: ProcessingOptions, index: number
     }
     
     // NEW NAMING LOGIC
-    // We completely ignore the old hash/alias
     const newAlias = generateNewAlias("Config", index, loc, options);
     urlObj.hash = encodeURIComponent(newAlias);
 
@@ -255,14 +247,9 @@ const processUrlBased = (link: string, options: ProcessingOptions, index: number
 export const processConfigs = async (input: string, options: ProcessingOptions): Promise<string> => {
   const lines = input.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   
-  // 1. Resolve GeoIPs (Always do this if we want location naming, or if user toggled it)
-  // Even if 'addLocationFlag' is false in options, the user might still want to use the Naming logic
-  // But usually, naming relies on location detection. Let's assume we always try to resolve 
-  // if the user expects "Country Name" in the output.
+  // 1. Resolve GeoIPs
   let hostLocationMap: Record<string, LocationData> = {};
   
-  // We resolve if option is checked OR if user didn't disable location explicitly 
-  // (Assuming 'addLocationFlag' acts as the master switch for GeoIP lookup)
   if (options.addLocationFlag) {
       const hosts = lines.map(line => {
           if (line.startsWith('vmess://')) return getHostFromVmess(line);
