@@ -1,0 +1,5 @@
+{
+  "name": "V2Ray SubManager",
+  "description": "A serverless V2Ray subscription manager. Process configs with Fragment/Mux settings and publish directly to GitHub Gists.",
+  "requestFramePermissions": []
+}
