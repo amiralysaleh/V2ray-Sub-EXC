@@ -27,6 +27,7 @@ export interface ProcessingOptions {
   customDNS: string;
   enableCDNIP: boolean;
   customCDN: string;
+  customBaseName: string; // New field for user defined name
 }
 
 export interface LogEntry {
@@ -35,10 +36,6 @@ export interface LogEntry {
   timestamp: Date;
 }
 
-/**
- * Result of a server latency test.
- * Used in speedTestService.ts to track the performance of V2Ray servers.
- */
 export interface PingResult {
   id: string;
   alias: string;
