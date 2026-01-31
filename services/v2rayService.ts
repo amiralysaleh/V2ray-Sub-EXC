@@ -102,33 +102,46 @@ const processVmess = (link: string, options: ProcessingOptions, index: number, l
     const config = JSON.parse(jsonStr);
 
     // Apply Custom CDN IP
+    // Logic: If net is WS/GRPC, swap address with CDN, but KEEP original host in "host" and "sni"
     if (options.enableCDNIP && options.customCDN && (config.net === 'ws' || config.net === 'grpc')) {
-        const originalAdd = config.add;
+        const originalAddress = config.add;
         config.add = options.customCDN;
-        if (!config.host) config.host = originalAdd;
-        if (!config.sni) config.sni = originalAdd;
+        
+        // Preserve Host header: If empty, use original address
+        if (!config.host || config.host.length === 0) {
+            config.host = originalAddress;
+        }
+        
+        // Preserve SNI: If empty and using TLS, use original address
+        if (config.tls === 'tls' && (!config.sni || config.sni.length === 0)) {
+            config.sni = originalAddress;
+        }
     }
 
     // Apply Mux
+    // Logic: Inject standard Mux object for clients that support it
     if (options.enableMux) {
-       // Mux logic usually handled by client, but we can tag if needed. 
-       // Keeping clean as per request.
+       config.mux = {
+           enabled: true,
+           concurrency: options.muxConcurrency || 8
+       };
     }
 
     // Allow Insecure
-    if (options.allowInsecure) {
-        if (!config.tls) config.tls = "tls"; 
-    }
+    // Logic: Do NOT force TLS. Only set verify param if TLS is already active.
+    // 'skip-cert-verify' isn't standard in V2RayN JSON but 'verify_cert' sometimes is.
+    // To be safe and avoid breaking, we mostly rely on clients global settings, 
+    // but we can ensure we don't accidentally enable strict checking.
+    // We removed the breaking `config.tls="tls"` line here.
 
     // Optimize ALPN
     if (options.enableALPN && config.tls === 'tls') {
         config.alpn = "h2,http/1.1";
     }
 
-    // Apply DNS
-    if (options.enableDNS && options.customDNS) {
-      (config as any).dns = options.customDNS;
-    }
+    // Global DNS
+    // Logic: Removed. DNS is a client-side setting, not a per-proxy setting in VMess JSON.
+    // Adding it typically does nothing or causes parse errors.
 
     // NEW NAMING LOGIC
     config.ps = generateNewAlias(config.ps, index, loc, options);
@@ -155,6 +168,9 @@ const processSSR = (link: string, options: ProcessingOptions, index: number, loc
     // NEW NAMING LOGIC
     const newAlias = generateNewAlias("SSR", index, loc, options);
     params.set('remarks', safeBase64UrlEncode(newAlias));
+
+    // SSR doesn't support modern V2Ray params (Mux, Fragment, etc) in link
+    // We only touch the name.
 
     const newDecoded = `${mainPart}/?${params.toString()}`;
     return 'ssr://' + safeBase64UrlEncode(newDecoded);
@@ -201,22 +217,35 @@ const processUrlBased = (link: string, options: ProcessingOptions, index: number
     if (options.enableCDNIP && options.customCDN && isWsOrGrpc) {
         const originalHost = urlObj.hostname;
         urlObj.hostname = options.customCDN;
-        if (!params.has('host')) params.set('host', originalHost);
-        if (!params.has('sni')) params.set('sni', originalHost);
+        
+        // Ensure Host is preserved
+        if (!params.has('host')) {
+            params.set('host', originalHost);
+        }
+        
+        // Ensure SNI is preserved (if TLS is involved)
+        const security = params.get('security');
+        if (!params.has('sni') && (security === 'tls' || security === 'reality' || security === 'xtls')) {
+            params.set('sni', originalHost);
+        }
     }
 
     // Apply Mux
+    // Note: 'mux' query param is supported by v2rayNG/v2rayN but not standard Xray-core.
+    // We keep it as it's a requested feature for mobile clients.
     if (options.enableMux) {
       params.set('mux', 'true');
       params.set('concurrency', options.muxConcurrency.toString());
     }
 
     // Fragment
+    // Note: Supported by v2rayNG/V2Box
     if (options.enableFragment) {
       params.set('fragment', `${options.fragmentLength},${options.fragmentInterval},random`);
     }
 
     // Insecure
+    // Standard query param for VLESS/Trojan
     if (options.allowInsecure) {
       params.set('allowInsecure', '1');
     }
@@ -229,11 +258,9 @@ const processUrlBased = (link: string, options: ProcessingOptions, index: number
         }
     }
 
-    // Custom DNS
-    if (options.enableDNS && options.customDNS) {
-      params.set('dns', options.customDNS);
-    }
-    
+    // Global DNS
+    // Removed to prevent link corruption. DNS is a client setting.
+
     // NEW NAMING LOGIC
     const newAlias = generateNewAlias("Config", index, loc, options);
     urlObj.hash = encodeURIComponent(newAlias);
