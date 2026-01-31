@@ -1,12 +1,11 @@
 import { ProcessingOptions } from '../types';
-import { batchResolve } from './geoIpService';
+import { batchResolve, LocationData } from './geoIpService';
 
 // Helper to base64 encode/decode safely
 export const safeB64Decode = (str: string) => {
   try {
     return decodeURIComponent(escape(atob(str)));
   } catch (e) {
-    // Attempt to handle URL-safe chars if standard atob fails
     try {
         const fixedStr = str.replace(/-/g, '+').replace(/_/g, '/');
         return decodeURIComponent(escape(atob(fixedStr)));
@@ -55,20 +54,54 @@ const getHostFromVmess = (link: string): string | null => {
 
 const getHostFromUrl = (link: string): string | null => {
     try {
-        // Handle SSR separately as it has different structure
         if (link.startsWith('ssr://')) {
              const b64 = link.replace('ssr://', '').split('/')[0];
              const decoded = safeB64Decode(b64);
              return decoded.split(':')[0] || null;
         }
-        // VLESS, Trojan, SS, etc.
         const url = new URL(link);
         return url.hostname;
     } catch { return null; }
 };
 
+// --- Naming Logic Helper ---
+const generateNewAlias = (
+    originalAlias: string, 
+    index: number, 
+    location: LocationData | undefined, 
+    options: ProcessingOptions
+): string => {
+    const parts: string[] = [];
+
+    // 1. Add Location Info (Flag + Country + City)
+    if (location) {
+        parts.push(location.flag);
+        if (location.country) parts.push(location.country);
+        if (location.city) parts.push(location.city);
+    }
+
+    // 2. Add Custom Base Name (User Defined)
+    if (options.customBaseName) {
+        parts.push(options.customBaseName);
+    } 
+    // If NO location and NO custom name, strictly keep generic fallback, DO NOT use original name
+    else if (!location) {
+        parts.push("Server");
+    }
+
+    // 3. Add Index (Always or if required)
+    // The user requested removing old name entirely.
+    // Adding index is good practice to avoid duplicates.
+    parts.push(`#${index + 1}`);
+
+    // If Mux/Frag is enabled, maybe append small tag? 
+    // User asked to clean up names, so let's keep it minimal as requested.
+    
+    return parts.join(' ');
+};
+
 // Process VMess Link
-const processVmess = (link: string, options: ProcessingOptions, index: number, flag: string = ''): string => {
+const processVmess = (link: string, options: ProcessingOptions, index: number, loc: LocationData | undefined): string => {
   try {
     const b64Part = link.replace('vmess://', '');
     const jsonStr = safeB64Decode(b64Part);
@@ -76,25 +109,17 @@ const processVmess = (link: string, options: ProcessingOptions, index: number, f
 
     const config = JSON.parse(jsonStr);
 
-    // Apply Custom CDN IP (Revive Config)
-    // Only for WS or GRPC
+    // Apply Custom CDN IP
     if (options.enableCDNIP && options.customCDN && (config.net === 'ws' || config.net === 'grpc')) {
         const originalAdd = config.add;
         config.add = options.customCDN;
-        
-        // If host/sni not set, use original address
         if (!config.host) config.host = originalAdd;
         if (!config.sni) config.sni = originalAdd;
     }
 
     // Apply Mux
     if (options.enableMux) {
-      config.ps = `${config.ps} | Mux`;
-    }
-
-    // Apply Fragment
-    if (options.enableFragment) {
-       config.ps = `${config.ps} | Frag`;
+      // config.ps = `${config.ps} | Mux`; // REMOVED per request
     }
 
     // Allow Insecure
@@ -112,15 +137,8 @@ const processVmess = (link: string, options: ProcessingOptions, index: number, f
       (config as any).dns = options.customDNS;
     }
 
-    let alias = config.ps || 'VMess';
-    if (flag) {
-        alias = `${flag} ${alias}`;
-    }
-
-    if (options.addRandomAlias) {
-      alias = `${alias} #${index + 1}`;
-    }
-    config.ps = alias;
+    // NEW NAMING LOGIC
+    config.ps = generateNewAlias(config.ps, index, loc, options);
 
     return 'vmess://' + safeB64Encode(JSON.stringify(config));
   } catch (e) {
@@ -129,7 +147,7 @@ const processVmess = (link: string, options: ProcessingOptions, index: number, f
 };
 
 // Process SSR Link
-const processSSR = (link: string, options: ProcessingOptions, index: number, flag: string = ''): string => {
+const processSSR = (link: string, options: ProcessingOptions, index: number, loc: LocationData | undefined): string => {
   try {
     const b64 = link.replace(/^ssr:\/\//, '');
     const decoded = safeBase64UrlDecode(b64);
@@ -139,24 +157,11 @@ const processSSR = (link: string, options: ProcessingOptions, index: number, fla
     
     const mainPart = splitUrl[0];
     const paramsStr = splitUrl[1] || '';
-    
     const params = new URLSearchParams(paramsStr);
     
-    const currentRemarksB64 = params.get('remarks') || '';
-    let currentRemarks = '';
-    try {
-        currentRemarks = safeBase64UrlDecode(currentRemarksB64) || 'SSR';
-    } catch(e) {}
-    
-    if (flag) {
-        currentRemarks = `${flag} ${currentRemarks}`;
-    }
-    
-    if (options.addRandomAlias) {
-        currentRemarks = `${currentRemarks} #${index + 1}`;
-    }
-    
-    params.set('remarks', safeBase64UrlEncode(currentRemarks));
+    // NEW NAMING LOGIC
+    const newAlias = generateNewAlias("SSR", index, loc, options);
+    params.set('remarks', safeBase64UrlEncode(newAlias));
 
     const newDecoded = `${mainPart}/?${params.toString()}`;
     return 'ssr://' + safeBase64UrlEncode(newDecoded);
@@ -167,11 +172,12 @@ const processSSR = (link: string, options: ProcessingOptions, index: number, fla
 };
 
 // Process VLESS/Trojan/SS Link
-const processUrlBased = (link: string, options: ProcessingOptions, index: number, flag: string = ''): string => {
+const processUrlBased = (link: string, options: ProcessingOptions, index: number, loc: LocationData | undefined): string => {
   try {
     let urlObj: URL;
     let originalLink = link;
 
+    // Fix SS links without full URL structure
     if (link.startsWith('ss://') && !link.includes('@') && !link.includes('?')) {
         const hashIndex = link.indexOf('#');
         let b64 = link.substring(5, hashIndex > -1 ? hashIndex : undefined);
@@ -194,15 +200,14 @@ const processUrlBased = (link: string, options: ProcessingOptions, index: number
     
     const params = urlObj.searchParams;
 
-    // Apply Custom CDN IP (Revive Config)
+    // Apply Custom CDN IP
     const type = params.get('type');
-    const serviceName = params.get('serviceName'); // for grpc
+    const serviceName = params.get('serviceName');
     const isWsOrGrpc = type === 'ws' || type === 'grpc' || params.get('mode') === 'grpc' || !!serviceName;
 
     if (options.enableCDNIP && options.customCDN && isWsOrGrpc) {
         const originalHost = urlObj.hostname;
         urlObj.hostname = options.customCDN;
-
         if (!params.has('host')) params.set('host', originalHost);
         if (!params.has('sni')) params.set('sni', originalHost);
     }
@@ -226,7 +231,6 @@ const processUrlBased = (link: string, options: ProcessingOptions, index: number
     // Optimize ALPN
     if (options.enableALPN) {
         const security = params.get('security');
-        // Apply ALPN only if TLS or Reality is active
         if (security === 'tls' || security === 'reality' || security === 'xtls') {
             params.set('alpn', 'h2,http/1.1');
         }
@@ -237,22 +241,10 @@ const processUrlBased = (link: string, options: ProcessingOptions, index: number
       params.set('dns', options.customDNS);
     }
     
-    // Alias handling
-    let alias = "";
-    if (urlObj.hash) {
-        alias = decodeURIComponent(urlObj.hash.substring(1));
-    }
-    if (!alias) alias = "Config";
-    
-    if (flag) {
-        alias = `${flag} ${alias}`;
-    }
-
-    if (options.addRandomAlias) {
-        alias = `${alias} #${index + 1}`;
-    }
-    
-    urlObj.hash = alias;
+    // NEW NAMING LOGIC
+    // We completely ignore the old hash/alias
+    const newAlias = generateNewAlias("Config", index, loc, options);
+    urlObj.hash = encodeURIComponent(newAlias);
 
     return urlObj.toString();
   } catch (e) {
@@ -263,15 +255,21 @@ const processUrlBased = (link: string, options: ProcessingOptions, index: number
 export const processConfigs = async (input: string, options: ProcessingOptions): Promise<string> => {
   const lines = input.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   
-  // 1. Resolve GeoIPs if enabled
-  let hostFlagMap: Record<string, string> = {};
+  // 1. Resolve GeoIPs (Always do this if we want location naming, or if user toggled it)
+  // Even if 'addLocationFlag' is false in options, the user might still want to use the Naming logic
+  // But usually, naming relies on location detection. Let's assume we always try to resolve 
+  // if the user expects "Country Name" in the output.
+  let hostLocationMap: Record<string, LocationData> = {};
+  
+  // We resolve if option is checked OR if user didn't disable location explicitly 
+  // (Assuming 'addLocationFlag' acts as the master switch for GeoIP lookup)
   if (options.addLocationFlag) {
       const hosts = lines.map(line => {
           if (line.startsWith('vmess://')) return getHostFromVmess(line);
           return getHostFromUrl(line);
       }).filter((h): h is string => h !== null);
       
-      hostFlagMap = await batchResolve(hosts);
+      hostLocationMap = await batchResolve(hosts);
   }
 
   // 2. Process each line
@@ -280,14 +278,14 @@ export const processConfigs = async (input: string, options: ProcessingOptions):
     if (line.startsWith('vmess://')) host = getHostFromVmess(line);
     else host = getHostFromUrl(line);
     
-    const flag = (host && hostFlagMap[host]) ? hostFlagMap[host] : '';
+    const loc = (host && hostLocationMap[host]) ? hostLocationMap[host] : undefined;
 
     if (line.startsWith('vmess://')) {
-      return processVmess(line, options, index, flag);
+      return processVmess(line, options, index, loc);
     } else if (line.startsWith('ssr://')) {
-      return processSSR(line, options, index, flag);
+      return processSSR(line, options, index, loc);
     } else if (line.startsWith('vless://') || line.startsWith('trojan://') || line.startsWith('ss://')) {
-      return processUrlBased(line, options, index, flag);
+      return processUrlBased(line, options, index, loc);
     }
     return line;
   });
