@@ -4,7 +4,7 @@ import { createOrUpdateGist } from './services/githubService';
 import { generateSmartDescription } from './services/geminiService';
 import { Toggle } from './components/Toggle';
 import { ProcessingOptions, LogEntry } from './types';
-import { Activity, Link as LinkIcon, Terminal, Zap, AlertTriangle, Download, GitMerge, RefreshCw, Trash2, Settings2, Globe, Cloud, Network, Search, Plus } from 'lucide-react';
+import { Activity, Link as LinkIcon, Terminal, Zap, AlertTriangle, Download, GitMerge, RefreshCw, Trash2, Settings2, Globe, Cloud, Network, Search, Plus, Save } from 'lucide-react';
 
 const App: React.FC = () => {
   const githubToken = (import.meta as any).env?.VITE_GITHUB_TOKEN || '';
@@ -18,7 +18,7 @@ const App: React.FC = () => {
   
   // Import/Edit State
   const [importUrl, setImportUrl] = useState('');
-  const [gistId, setGistId] = useState<string | undefined>(undefined);
+  const [gistId, setGistId] = useState(''); // Changed to string (empty means no ID)
   
   // Processing Options
   const [options, setOptions] = useState<ProcessingOptions>({
@@ -37,26 +37,24 @@ const App: React.FC = () => {
     customCDN: ''
   });
 
+  // Helper to extract Gist ID robustly
+  const extractGistId = (url: string): string | null => {
+    // Matches standard 32-char hex IDs in various GitHub URL formats
+    // Priority to ID appearing after username or directly after domain
+    const regex = /(?:gist\.github(?:usercontent)?\.com)(?:\/[^/]+)?\/([0-9a-f]{32})/i;
+    const match = url.match(regex);
+    return match ? match[1] : null;
+  };
+
   // Automatically detect Gist ID when URL changes
   useEffect(() => {
-    if (!importUrl.trim()) {
-        setGistId(undefined);
-        return;
-    }
+    if (!importUrl.trim()) return;
     
-    // Look for standard 32-char hex ID in Gist URLs
-    if (importUrl.includes('gist.github')) {
-        const match = importUrl.match(/([0-9a-f]{32})/i);
-        if (match) {
-            const detectedId = match[1];
-            if (gistId !== detectedId) {
-                setGistId(detectedId);
-                // Optional: We can't log inside render/effect loop easily without cluttering, 
-                // but the UI badge updates immediately.
-            }
-        }
+    const detectedId = extractGistId(importUrl);
+    if (detectedId && detectedId !== gistId) {
+        setGistId(detectedId);
     }
-  }, [importUrl, gistId]);
+  }, [importUrl]);
 
   const addLog = (type: LogEntry['type'], message: string) => {
     setLogs(prev => [{ type, message, timestamp: new Date() }, ...prev]);
@@ -67,6 +65,10 @@ const App: React.FC = () => {
     setLoading(true);
     addLog('info', 'در حال دریافت کانفیگ‌ها از لینک...');
     try {
+      // Double check ID extraction on explicit import click
+      const detectedId = extractGistId(importUrl);
+      if (detectedId) setGistId(detectedId);
+
       const response = await fetch(importUrl);
       if (!response.ok) throw new Error('خطا در دریافت فایل');
       const text = await response.text();
@@ -74,8 +76,8 @@ const App: React.FC = () => {
       setInputConfigs(decoded);
       addLog('success', 'کانفیگ‌ها با موفقیت دریافت شدند.');
       
-      if (gistId) {
-        addLog('info', `شناسایی سابسکریپشن قدیمی (ID: ${gistId.substring(0,6)}...)`);
+      if (detectedId) {
+        addLog('info', `شناسایی سابسکریپشن قدیمی (ID: ${detectedId.substring(0,6)}...)`);
       }
     } catch (e: any) {
       addLog('error', `خطا در ورود: ${e.message}`);
@@ -84,7 +86,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handlePublish = async (forceNew: boolean = false) => {
+  const handlePublish = async (isUpdate: boolean) => {
     if (!githubToken) {
       addLog('error', 'توکن گیت‌هاب تنظیم نشده است.');
       return;
@@ -94,18 +96,23 @@ const App: React.FC = () => {
       return;
     }
 
-    setLoading(true);
-    const targetId = forceNew ? undefined : gistId;
-    const actionType = targetId ? 'UPDATE' : 'CREATE';
+    // STRICT CHECK: If user wants to update, ID MUST be present
+    if (isUpdate && !gistId.trim()) {
+        addLog('error', 'برای آپدیت، شناسه Gist ID الزامی است. لطفا آن را وارد کنید یا گزینه "Create New" را بزنید.');
+        return;
+    }
 
-    addLog('info', `شروع عملیات: ${actionType === 'UPDATE' ? 'بروزرسانی Gist فعلی' : 'ساخت Gist جدید'}...`);
+    setLoading(true);
+    const targetId = isUpdate ? gistId : undefined;
+    const actionType = isUpdate ? 'UPDATE' : 'CREATE';
+
+    addLog('info', `شروع عملیات: ${actionType === 'UPDATE' ? `بروزرسانی Gist (${gistId.substring(0,6)}...)` : 'ساخت Gist جدید'}...`);
     
     if (options.addLocationFlag) {
         addLog('info', 'در حال تشخیص موقعیت جغرافیایی سرورها (DNS + GeoIP)...');
     }
 
     try {
-      // Process Configs (now async due to GeoIP)
       const processed = await processConfigs(inputConfigs, options);
       const count = inputConfigs.split('\n').filter(l => l.trim()).length;
       const tehranTime = getTehranDate();
@@ -118,12 +125,12 @@ const App: React.FC = () => {
       
       if (res.files[filename]?.raw_url) {
         setResultUrl(res.files[filename].raw_url);
-        // If we forced a new one, update the current ID to the new one
-        if (!targetId || forceNew) {
+        
+        // If created new, set the ID
+        if (!targetId) {
             setGistId(res.id);
-            // Optionally update import URL to the new one? Maybe not to avoid confusion.
         }
-        addLog('success', targetId ? 'اشتراک با موفقیت بروزرسانی شد.' : 'اشتراک جدید با موفقیت ساخته شد.');
+        addLog('success', isUpdate ? 'اشتراک با موفقیت بروزرسانی شد.' : 'اشتراک جدید با موفقیت ساخته شد.');
       }
     } catch (e: any) {
       addLog('error', e.message);
@@ -263,25 +270,31 @@ const App: React.FC = () => {
             <h3 className="font-bold mb-2 flex items-center gap-1"><Settings2 size={14}/> Parameters</h3>
             <p className="opacity-70 flex items-center gap-1 mb-2"><Cloud size={10}/> Custom CDN: Replaces server address with clean IP, moves original address to Host/SNI (WS/GRPC only).</p>
             <p className="opacity-70 flex items-center gap-1 mb-2"><Network size={10}/> Optimize ALPN: Enforces HTTP/2 multiplexing for TLS connections.</p>
-            <p className="opacity-70 mb-2">Mux Concurrency: 1-1024</p>
-            <p className="opacity-70 flex items-center gap-1"><Globe size={10}/> Location Flags: Adds 🇩🇪, 🇺🇸, etc. to config names based on server IP.</p>
           </div>
         </div>
 
         {/* Main Content Area */}
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-gray-900/50 backdrop-blur-md rounded-2xl border border-gray-800 p-6 shadow-xl flex flex-col min-h-[480px]">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-2">
                 <h2 className="text-xl font-bold flex items-center gap-2 text-gray-100">
-                <Terminal className="text-primary-500" size={24} /> Input Source
+                  <Terminal className="text-primary-500" size={24} /> Input Source
                 </h2>
-                {gistId && (
-                <div className="flex items-center gap-2 text-[10px] font-bold text-blue-400 bg-blue-900/20 px-3 py-1.5 rounded-full border border-blue-900/50">
-                    <GitMerge size={12} />
-                    <span>TARGET: {gistId.substring(0, 8)}...</span>
-                    <button onClick={() => { setGistId(undefined); setImportUrl(''); setResultUrl(''); }} className="hover:text-white"><Trash2 size={12} /></button>
+                
+                {/* Gist ID Input - Visible now */}
+                <div className="flex items-center gap-2 w-full sm:w-auto bg-gray-950/80 rounded-lg border border-gray-800 focus-within:border-blue-500/50 px-2 py-1.5 transition-all">
+                    <GitMerge size={14} className="text-blue-500" />
+                    <input 
+                        type="text" 
+                        placeholder="Gist ID (Optional/Auto)" 
+                        value={gistId}
+                        onChange={(e) => setGistId(e.target.value.trim())}
+                        className="bg-transparent border-none text-[11px] font-mono text-blue-300 placeholder:text-gray-600 focus:outline-none w-full sm:w-48"
+                    />
+                    {gistId && (
+                        <button onClick={() => setGistId('')} className="text-gray-600 hover:text-red-400"><Trash2 size={12} /></button>
+                    )}
                 </div>
-                )}
             </div>
 
             <div className="flex gap-2 mb-4 p-2 bg-gray-950/80 rounded-xl border border-gray-800 focus-within:border-primary-500 transition-all">
@@ -309,35 +322,23 @@ const App: React.FC = () => {
               
               {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-                {gistId ? (
-                   <>
-                     <button
-                        onClick={() => handlePublish(true)}
-                        disabled={loading || !githubToken || !inputConfigs.trim()}
-                        className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 font-bold py-3 px-6 rounded-2xl transition-all active:scale-95 disabled:opacity-30 text-xs sm:text-sm whitespace-nowrap"
-                      >
-                         <Plus size={18} />
-                         Create New
-                      </button>
-                      <button
-                        onClick={() => handlePublish(false)}
-                        disabled={loading || !githubToken || !inputConfigs.trim()}
-                        className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-black py-3 px-8 rounded-2xl shadow-xl shadow-green-900/20 transition-all active:scale-95 disabled:opacity-30 text-xs sm:text-sm whitespace-nowrap"
-                      >
-                        {loading ? <RefreshCw className="animate-spin" size={18} /> : <RefreshCw size={18} />}
-                        Update Existing
-                      </button>
-                   </>
-                ) : (
-                  <button
+                 <button
                     onClick={() => handlePublish(false)}
                     disabled={loading || !githubToken || !inputConfigs.trim()}
-                    className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-primary-600 to-indigo-600 hover:from-primary-500 hover:to-indigo-500 text-white font-black py-4 px-10 rounded-2xl shadow-xl shadow-primary-900/40 transition-all active:scale-95 disabled:opacity-30"
+                    className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 font-bold py-3 px-6 rounded-2xl transition-all active:scale-95 disabled:opacity-30 text-xs sm:text-sm whitespace-nowrap"
                   >
-                    {loading ? <RefreshCw className="animate-spin" size={20} /> : <Zap size={20} />}
-                    PUBLISH TO GITHUB
+                     <Plus size={18} />
+                     Create New
                   </button>
-                )}
+                  <button
+                    onClick={() => handlePublish(true)}
+                    disabled={loading || !githubToken || !inputConfigs.trim() || !gistId}
+                    className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 disabled:from-gray-700 disabled:to-gray-700 text-white font-black py-3 px-8 rounded-2xl shadow-xl shadow-green-900/20 disabled:shadow-none transition-all active:scale-95 disabled:opacity-50 text-xs sm:text-sm whitespace-nowrap"
+                    title={!gistId ? 'Requires Gist ID' : 'Update this Gist'}
+                  >
+                    {loading ? <RefreshCw className="animate-spin" size={18} /> : <Save size={18} />}
+                    Update Existing
+                  </button>
               </div>
             </div>
           </div>
