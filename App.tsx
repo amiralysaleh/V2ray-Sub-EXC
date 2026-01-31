@@ -10,7 +10,7 @@ const App: React.FC = () => {
   const githubToken = (import.meta as any).env?.VITE_GITHUB_TOKEN || '';
 
   // App State
-  const [filename] = useState('sub.txt');
+  const [filename, setFilename] = useState('sub.txt'); // Changed to mutable state
   const [inputConfigs, setInputConfigs] = useState('');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -35,7 +35,7 @@ const App: React.FC = () => {
     customDNS: '8.8.8.8',
     enableCDNIP: false,
     customCDN: '',
-    customBaseName: '' // New Field
+    customBaseName: ''
   });
 
   // Helper to extract Gist ID robustly
@@ -43,6 +43,22 @@ const App: React.FC = () => {
     const regex = /(?:gist\.github(?:usercontent)?\.com)(?:\/[^/]+)?\/([0-9a-f]{32})/i;
     const match = url.match(regex);
     return match ? match[1] : null;
+  };
+
+  // Helper to extract Filename from URL
+  const extractFilename = (url: string): string => {
+    try {
+        const cleanUrl = url.split('?')[0].split('#')[0];
+        const parts = cleanUrl.split('/');
+        const possibleName = parts[parts.length - 1];
+        // If it looks like a valid filename (has extension or length), use it
+        if (possibleName && possibleName.includes('.')) {
+            return possibleName;
+        }
+        return 'sub.txt';
+    } catch {
+        return 'sub.txt';
+    }
   };
 
   // Automatically detect Gist ID when URL changes
@@ -67,12 +83,19 @@ const App: React.FC = () => {
       const detectedId = extractGistId(importUrl);
       if (detectedId) setGistId(detectedId);
 
-      const response = await fetch(importUrl);
+      // Extract and set filename so we overwrite the correct file
+      const detectedFilename = extractFilename(importUrl);
+      setFilename(detectedFilename);
+      
+      // Add Cache Busting timestamp
+      const fetchUrl = `${importUrl}${importUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
+      
+      const response = await fetch(fetchUrl);
       if (!response.ok) throw new Error('خطا در دریافت فایل');
       const text = await response.text();
       const decoded = parseSubscription(text);
       setInputConfigs(decoded);
-      addLog('success', 'کانفیگ‌ها با موفقیت دریافت شدند.');
+      addLog('success', `کانفیگ‌ها دریافت شدند. (فایل هدف: ${detectedFilename})`);
       
       if (detectedId) {
         addLog('info', `شناسایی سابسکریپشن قدیمی (ID: ${detectedId.substring(0,6)}...)`);
@@ -104,7 +127,8 @@ const App: React.FC = () => {
     const actionType = isUpdate ? 'UPDATE' : 'CREATE';
 
     addLog('info', `شروع عملیات: ${actionType === 'UPDATE' ? `بروزرسانی Gist (${gistId.substring(0,6)}...)` : 'ساخت Gist جدید'}...`);
-    
+    addLog('info', `فایل هدف: ${filename}`);
+
     if (options.addLocationFlag) {
         addLog('info', 'در حال تشخیص موقعیت جغرافیایی و نام‌گذاری مجدد سرورها...');
     }
@@ -131,6 +155,10 @@ const App: React.FC = () => {
             setGistId(res.id);
         }
         addLog('success', isUpdate ? 'اشتراک با موفقیت بروزرسانی شد.' : 'اشتراک جدید با موفقیت ساخته شد.');
+        
+        if (isUpdate) {
+             addLog('info', 'توجه: به دلیل کش CDN گیت‌هاب، تغییرات ممکن است تا ۵ دقیقه روی لینک ثابت اعمال نشود.');
+        }
       }
     } catch (e: any) {
       addLog('error', e.message);
