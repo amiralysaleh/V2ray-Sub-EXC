@@ -4,7 +4,7 @@ import { createOrUpdateGist } from './services/githubService';
 import { generateSmartDescription } from './services/geminiService';
 import { Toggle } from './components/Toggle';
 import { ProcessingOptions, LogEntry } from './types';
-import { Activity, Link as LinkIcon, Terminal, Zap, AlertTriangle, Download, GitMerge, RefreshCw, Trash2, Settings2, Globe, Cloud, Network, Search } from 'lucide-react';
+import { Activity, Link as LinkIcon, Terminal, Zap, AlertTriangle, Download, GitMerge, RefreshCw, Trash2, Settings2, Globe, Cloud, Network, Search, Plus } from 'lucide-react';
 
 const App: React.FC = () => {
   const githubToken = (import.meta as any).env?.VITE_GITHUB_TOKEN || '';
@@ -53,10 +53,11 @@ const App: React.FC = () => {
       setInputConfigs(decoded);
       addLog('success', 'کانفیگ‌ها با موفقیت دریافت شدند.');
       
-      const gistMatch = importUrl.match(/gist\.githubusercontent\.com\/[^/]+\/([a-f0-9]+)\/raw/);
+      // Improved Regex to catch both Raw and Standard Gist URLs
+      const gistMatch = importUrl.match(/(?:gist\.githubusercontent\.com|gist\.github\.com)\/[^/]+\/([a-f0-9]+)/);
       if (gistMatch) {
         setGistId(gistMatch[1]);
-        addLog('info', `حالت ویرایش فعال شد (Gist ID: ${gistMatch[1]})`);
+        addLog('info', `شناسایی سابسکریپشن قدیمی (ID: ${gistMatch[1].substring(0,6)}...)`);
       }
     } catch (e: any) {
       addLog('error', `خطا در ورود: ${e.message}`);
@@ -65,7 +66,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handlePublish = async () => {
+  const handlePublish = async (forceNew: boolean = false) => {
     if (!githubToken) {
       addLog('error', 'توکن گیت‌هاب تنظیم نشده است.');
       return;
@@ -76,7 +77,11 @@ const App: React.FC = () => {
     }
 
     setLoading(true);
-    addLog('info', 'در حال پردازش کانفیگ‌ها...');
+    const targetId = forceNew ? undefined : gistId;
+    const actionType = targetId ? 'UPDATE' : 'CREATE';
+
+    addLog('info', `شروع عملیات: ${actionType === 'UPDATE' ? 'بروزرسانی Gist فعلی' : 'ساخت Gist جدید'}...`);
+    
     if (options.addLocationFlag) {
         addLog('info', 'در حال تشخیص موقعیت جغرافیایی سرورها (DNS + GeoIP)...');
     }
@@ -90,13 +95,16 @@ const App: React.FC = () => {
       addLog('info', 'در حال تولید توضیحات هوشمند توسط Gemini...');
       const desc = await generateSmartDescription(count, tehranTime);
       
-      addLog('info', gistId ? 'در حال آپدیت Gist موجود...' : 'در حال انتشار در Gist جدید...');
-      const res = await createOrUpdateGist(githubToken, filename, processed, desc, gistId);
+      addLog('info', 'در حال ارسال به GitHub...');
+      const res = await createOrUpdateGist(githubToken, filename, processed, desc, targetId);
       
       if (res.files[filename]?.raw_url) {
         setResultUrl(res.files[filename].raw_url);
-        if (!gistId) setGistId(res.id);
-        addLog('success', 'اشتراک با موفقیت در گیت‌هاب منتشر/آپدیت شد.');
+        // If we forced a new one, update the current ID to the new one
+        if (!targetId || forceNew) {
+            setGistId(res.id);
+        }
+        addLog('success', targetId ? 'اشتراک با موفقیت بروزرسانی شد.' : 'اشتراک جدید با موفقیت ساخته شد.');
       }
     } catch (e: any) {
       addLog('error', e.message);
@@ -279,14 +287,39 @@ const App: React.FC = () => {
               <div className="text-xs text-gray-500 font-medium italic">
                 {inputConfigs.split('\n').filter(l => l.trim()).length} servers detected in list
               </div>
-              <button
-                onClick={handlePublish}
-                disabled={loading || !githubToken || !inputConfigs.trim()}
-                className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-primary-600 to-indigo-600 hover:from-primary-500 hover:to-indigo-500 text-white font-black py-4 px-10 rounded-2xl shadow-xl shadow-primary-900/40 transition-all active:scale-95 disabled:opacity-30"
-              >
-                {loading ? <RefreshCw className="animate-spin" size={20} /> : <Zap size={20} />}
-                {gistId ? 'UPDATE SUBSCRIPTION' : 'PUBLISH TO GITHUB'}
-              </button>
+              
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                {gistId ? (
+                   <>
+                     <button
+                        onClick={() => handlePublish(true)}
+                        disabled={loading || !githubToken || !inputConfigs.trim()}
+                        className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 font-bold py-3 px-6 rounded-2xl transition-all active:scale-95 disabled:opacity-30 text-xs sm:text-sm whitespace-nowrap"
+                      >
+                         <Plus size={18} />
+                         Create New
+                      </button>
+                      <button
+                        onClick={() => handlePublish(false)}
+                        disabled={loading || !githubToken || !inputConfigs.trim()}
+                        className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white font-black py-3 px-8 rounded-2xl shadow-xl shadow-green-900/20 transition-all active:scale-95 disabled:opacity-30 text-xs sm:text-sm whitespace-nowrap"
+                      >
+                        {loading ? <RefreshCw className="animate-spin" size={18} /> : <RefreshCw size={18} />}
+                        Update Existing
+                      </button>
+                   </>
+                ) : (
+                  <button
+                    onClick={() => handlePublish(false)}
+                    disabled={loading || !githubToken || !inputConfigs.trim()}
+                    className="w-full sm:w-auto flex items-center justify-center gap-3 bg-gradient-to-r from-primary-600 to-indigo-600 hover:from-primary-500 hover:to-indigo-500 text-white font-black py-4 px-10 rounded-2xl shadow-xl shadow-primary-900/40 transition-all active:scale-95 disabled:opacity-30"
+                  >
+                    {loading ? <RefreshCw className="animate-spin" size={20} /> : <Zap size={20} />}
+                    PUBLISH TO GITHUB
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
