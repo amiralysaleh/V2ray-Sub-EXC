@@ -56,9 +56,10 @@ export const resolveLocation = async (host: string): Promise<LocationData | null
 
         // 2. Get GeoIP using ipwho.is
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
         
-        const geoRes = await fetch(`https://ipwho.is/${ip}`, { signal: controller.signal });
+        // Add random param to avoid cache hits on the API side if needed
+        const geoRes = await fetch(`https://ipwho.is/${ip}?lang=en`, { signal: controller.signal });
         clearTimeout(timeoutId);
         
         const geoData = await geoRes.json();
@@ -83,13 +84,18 @@ export const batchResolve = async (hosts: string[]): Promise<Record<string, Loca
     const uniqueHosts = [...new Set(hosts.filter(h => !!h))];
     const results: Record<string, LocationData> = {};
     
-    const BATCH_SIZE = 3;
+    // Reduced batch size and added delay to avoid rate limits (which cause incorrect location data)
+    const BATCH_SIZE = 2;
     for (let i = 0; i < uniqueHosts.length; i += BATCH_SIZE) {
         const batch = uniqueHosts.slice(i, i + BATCH_SIZE);
         await Promise.all(batch.map(async (host) => {
+            // Small jitter
+            await new Promise(r => setTimeout(r, Math.random() * 300));
             const res = await resolveLocation(host);
             if (res) results[host] = res;
         }));
+        // Delay between batches
+        await new Promise(r => setTimeout(r, 800));
     }
     return results;
 };
