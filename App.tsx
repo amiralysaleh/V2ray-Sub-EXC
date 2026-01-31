@@ -4,7 +4,7 @@ import { createOrUpdateGist } from './services/githubService';
 import { generateSmartDescription } from './services/geminiService';
 import { Toggle } from './components/Toggle';
 import { ProcessingOptions, LogEntry } from './types';
-import { Activity, Link as LinkIcon, Terminal, Zap, AlertTriangle, Download, GitMerge, RefreshCw, Trash2, Settings2, Globe, Cloud, Network, Search, Plus, Save } from 'lucide-react';
+import { Activity, Link as LinkIcon, Terminal, Zap, AlertTriangle, Download, GitMerge, RefreshCw, Trash2, Settings2, Globe, Cloud, Network, Search, Plus, Save, PenTool } from 'lucide-react';
 
 const App: React.FC = () => {
   const githubToken = (import.meta as any).env?.VITE_GITHUB_TOKEN || '';
@@ -18,7 +18,7 @@ const App: React.FC = () => {
   
   // Import/Edit State
   const [importUrl, setImportUrl] = useState('');
-  const [gistId, setGistId] = useState(''); // Changed to string (empty means no ID)
+  const [gistId, setGistId] = useState(''); 
   
   // Processing Options
   const [options, setOptions] = useState<ProcessingOptions>({
@@ -30,17 +30,16 @@ const App: React.FC = () => {
     allowInsecure: false,
     enableALPN: false,
     addRandomAlias: true,
-    addLocationFlag: true,
+    addLocationFlag: true, // Master switch for GeoIP Naming
     enableDNS: false,
     customDNS: '8.8.8.8',
     enableCDNIP: false,
-    customCDN: ''
+    customCDN: '',
+    customBaseName: '' // New Field
   });
 
   // Helper to extract Gist ID robustly
   const extractGistId = (url: string): string | null => {
-    // Matches standard 32-char hex IDs in various GitHub URL formats
-    // Priority to ID appearing after username or directly after domain
     const regex = /(?:gist\.github(?:usercontent)?\.com)(?:\/[^/]+)?\/([0-9a-f]{32})/i;
     const match = url.match(regex);
     return match ? match[1] : null;
@@ -65,7 +64,6 @@ const App: React.FC = () => {
     setLoading(true);
     addLog('info', 'در حال دریافت کانفیگ‌ها از لینک...');
     try {
-      // Double check ID extraction on explicit import click
       const detectedId = extractGistId(importUrl);
       if (detectedId) setGistId(detectedId);
 
@@ -96,7 +94,6 @@ const App: React.FC = () => {
       return;
     }
 
-    // STRICT CHECK: If user wants to update, ID MUST be present
     if (isUpdate && !gistId.trim()) {
         addLog('error', 'برای آپدیت، شناسه Gist ID الزامی است. لطفا آن را وارد کنید یا گزینه "Create New" را بزنید.');
         return;
@@ -109,7 +106,7 @@ const App: React.FC = () => {
     addLog('info', `شروع عملیات: ${actionType === 'UPDATE' ? `بروزرسانی Gist (${gistId.substring(0,6)}...)` : 'ساخت Gist جدید'}...`);
     
     if (options.addLocationFlag) {
-        addLog('info', 'در حال تشخیص موقعیت جغرافیایی سرورها (DNS + GeoIP)...');
+        addLog('info', 'در حال تشخیص موقعیت جغرافیایی و نام‌گذاری مجدد سرورها...');
     }
 
     try {
@@ -125,16 +122,11 @@ const App: React.FC = () => {
       
       if (res.files[filename]?.raw_url) {
         const rawUrl = res.files[filename].raw_url;
-        
-        // CRITICAL FIX: Convert specific commit URL to Permanent "HEAD" URL
-        // From: https://gist.../user/id/raw/LONG_HASH/sub.txt
-        // To:   https://gist.../user/id/raw/sub.txt
-        // This ensures the link stays exactly the same after updates.
+        // Strip commit hash for permanent link
         const permanentUrl = rawUrl.replace(/\/raw\/[a-z0-9]+\//i, '/raw/');
 
         setResultUrl(permanentUrl);
         
-        // If created new, set the ID
         if (!targetId) {
             setGistId(res.id);
         }
@@ -180,6 +172,27 @@ const App: React.FC = () => {
               <Activity className="text-primary-500" size={22} /> Settings
             </h2>
             <div className="space-y-1 divide-y divide-gray-800/50">
+              
+              {/* Naming Settings */}
+              <div className="py-3">
+                 <div className="flex items-center gap-2 mb-2 text-sm font-bold text-gray-200">
+                     <PenTool size={16} className="text-purple-400"/>
+                     Config Naming
+                 </div>
+                 <Toggle label="Auto Rename (Flag+City)" description="Overwrites original names" checked={options.addLocationFlag} onChange={(v) => setOptions({...options, addLocationFlag: v})} />
+                 
+                 <div className="mt-2 px-2">
+                     <label className="text-[10px] text-gray-500 font-bold uppercase block mb-1">Custom Base Name (Optional)</label>
+                     <input 
+                       type="text" 
+                       placeholder="e.g. MyServer, VIP" 
+                       value={options.customBaseName} 
+                       onChange={(e) => setOptions({...options, customBaseName: e.target.value})} 
+                       className="w-full bg-gray-950/50 border border-gray-800 rounded px-2 py-1.5 text-xs text-purple-300 font-mono outline-none focus:border-purple-500/50 placeholder:text-gray-700"
+                     />
+                 </div>
+              </div>
+
               {/* Custom CDN/IP Section */}
               <div className="py-1">
                 <Toggle label="Custom Cloudflare IP" description="Revive broken configs (WS/GRPC)" checked={options.enableCDNIP} onChange={(v) => setOptions({...options, enableCDNIP: v})} />
@@ -192,15 +205,6 @@ const App: React.FC = () => {
                         onChange={(e) => setOptions({...options, customCDN: e.target.value})} 
                         className="w-full bg-gray-950/50 border border-yellow-800/50 rounded px-2 py-1.5 text-xs text-yellow-300 font-mono outline-none focus:border-yellow-500/50"
                       />
-                    <a 
-                      href="https://drunkleen.github.io/ip-scanner/" 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-2 w-full py-2 bg-yellow-900/20 hover:bg-yellow-900/30 border border-yellow-800/30 rounded text-yellow-500 text-[10px] font-bold transition-colors"
-                    >
-                      <Search size={12} />
-                      FIND CLEAN IP (SCANNER)
-                    </a>
                   </div>
                 )}
               </div>
@@ -252,7 +256,6 @@ const App: React.FC = () => {
               </div>
 
               <Toggle label="Allow Insecure" description="Skip TLS verification" checked={options.allowInsecure} onChange={(v) => setOptions({...options, allowInsecure: v})} />
-              
               <Toggle label="Optimize ALPN" description="Force h2,http/1.1 (TLS only)" checked={options.enableALPN} onChange={(v) => setOptions({...options, enableALPN: v})} />
 
               <div className="py-1">
@@ -268,16 +271,13 @@ const App: React.FC = () => {
                   </div>
                 )}
               </div>
-              
-              <Toggle label="Add Location Flags" description="Detect country & add emoji" checked={options.addLocationFlag} onChange={(v) => setOptions({...options, addLocationFlag: v})} />
-              <Toggle label="Alias Indexing" description="Add index to names" checked={options.addRandomAlias} onChange={(v) => setOptions({...options, addRandomAlias: v})} />
             </div>
           </div>
 
           <div className="p-6 bg-blue-900/10 rounded-2xl border border-blue-800/30 text-xs text-blue-300 leading-relaxed">
             <h3 className="font-bold mb-2 flex items-center gap-1"><Settings2 size={14}/> Parameters</h3>
-            <p className="opacity-70 flex items-center gap-1 mb-2"><Cloud size={10}/> Custom CDN: Replaces server address with clean IP, moves original address to Host/SNI (WS/GRPC only).</p>
-            <p className="opacity-70 flex items-center gap-1 mb-2"><Network size={10}/> Optimize ALPN: Enforces HTTP/2 multiplexing for TLS connections.</p>
+            <p className="opacity-70 flex items-center gap-1 mb-2"><PenTool size={10}/> Naming: Replaces aliases with "🇩🇪 Germany Frankfurt [CustomName] #1".</p>
+            <p className="opacity-70 flex items-center gap-1 mb-2"><Cloud size={10}/> Custom CDN: Replaces server address with clean IP.</p>
           </div>
         </div>
 
