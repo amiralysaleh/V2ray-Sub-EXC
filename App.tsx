@@ -179,13 +179,13 @@ const App: React.FC = () => {
                      <PenTool size={16} className="text-purple-400"/>
                      Config Naming
                  </div>
-                 <Toggle label="Auto Rename (Flag+City)" description="Overwrites original names" checked={options.addLocationFlag} onChange={(v) => setOptions({...options, addLocationFlag: v})} />
+                 <Toggle label="Auto Rename" description="Format: Flag Country City Name #N" checked={options.addLocationFlag} onChange={(v) => setOptions({...options, addLocationFlag: v})} />
                  
                  <div className="mt-2 px-2">
-                     <label className="text-[10px] text-gray-500 font-bold uppercase block mb-1">Custom Base Name (Optional)</label>
+                     <label className="text-[10px] text-gray-500 font-bold uppercase block mb-1">Custom Base Name</label>
                      <input 
                        type="text" 
-                       placeholder="e.g. MyServer, VIP" 
+                       placeholder="Default: VS (e.g. MyVPN)" 
                        value={options.customBaseName} 
                        onChange={(e) => setOptions({...options, customBaseName: e.target.value})} 
                        className="w-full bg-gray-950/50 border border-gray-800 rounded px-2 py-1.5 text-xs text-purple-300 font-mono outline-none focus:border-purple-500/50 placeholder:text-gray-700"
