@@ -31,8 +31,6 @@ const App: React.FC = () => {
     enableALPN: false,
     addRandomAlias: true,
     addLocationFlag: true, // Master switch for GeoIP Naming
-    enableDNS: false,
-    customDNS: '8.8.8.8',
     enableCDNIP: false,
     customCDN: '',
     customBaseName: ''
@@ -285,20 +283,6 @@ const App: React.FC = () => {
 
               <Toggle label="Allow Insecure" description="Skip TLS verification" checked={options.allowInsecure} onChange={(v) => setOptions({...options, allowInsecure: v})} />
               <Toggle label="Optimize ALPN" description="Force h2,http/1.1 (TLS only)" checked={options.enableALPN} onChange={(v) => setOptions({...options, enableALPN: v})} />
-
-              <div className="py-1">
-                <Toggle label="Global DNS" description="Custom DNS for nodes" checked={options.enableDNS} onChange={(v) => setOptions({...options, enableDNS: v})} />
-                {options.enableDNS && (
-                  <div className="pb-3 px-2">
-                    <input 
-                        type="text" 
-                        value={options.customDNS} 
-                        onChange={(e) => setOptions({...options, customDNS: e.target.value})} 
-                        className="w-full bg-gray-950/50 border border-gray-800 rounded px-2 py-1 text-xs text-primary-400 font-mono outline-none focus:border-primary-500/50"
-                      />
-                  </div>
-                )}
-              </div>
             </div>
           </div>
 
