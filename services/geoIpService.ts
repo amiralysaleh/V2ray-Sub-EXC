@@ -1,16 +1,22 @@
-const CACHE_KEY = 'v2ray_geoip_cache_v1';
+export interface LocationData {
+  flag: string;
+  country: string;
+  city: string;
+}
+
+const CACHE_KEY = 'v2ray_geoip_full_cache_v2';
 
 // Helper to get cache from localStorage
-const getCache = (): Record<string, string> => {
+const getCache = (): Record<string, LocationData> => {
     try {
         return JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
     } catch { return {}; }
 };
 
 // Helper to save cache
-const updateCache = (host: string, flag: string) => {
+const updateCache = (host: string, data: LocationData) => {
     const cache = getCache();
-    cache[host] = flag;
+    cache[host] = data;
     localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
 };
 
@@ -24,8 +30,8 @@ const getFlagEmoji = (countryCode: string) => {
     return String.fromCodePoint(...codePoints);
 };
 
-export const resolveLocation = async (host: string): Promise<string> => {
-    if (!host) return '';
+export const resolveLocation = async (host: string): Promise<LocationData | null> => {
+    if (!host) return null;
     
     // Check local cache first
     const cache = getCache();
@@ -34,25 +40,21 @@ export const resolveLocation = async (host: string): Promise<string> => {
     try {
         let ip = host;
         
-        // 1. Resolve DNS if it's a domain (simple check: contains letters and not IPv6)
-        // We use Google DNS over HTTPS because browsers can't do raw DNS lookups
+        // 1. Resolve DNS if it's a domain
         if (/[a-zA-Z]/.test(host) && !host.includes(':')) {
             try {
                 const dnsRes = await fetch(`https://dns.google/resolve?name=${host}&type=A`);
                 const dnsData = await dnsRes.json();
                 if (dnsData.Answer && dnsData.Answer.length > 0) {
-                    // Find first A record
                     const aRecord = dnsData.Answer.find((r: any) => r.type === 1);
                     if (aRecord) ip = aRecord.data;
                 }
             } catch (dnsError) {
                 console.warn(`DNS lookup failed for ${host}`, dnsError);
-                // Fallback: try to resolve the domain directly with the GeoIP provider
             }
         }
 
-        // 2. Get GeoIP using ipwho.is (Free, HTTPS, No API Key)
-        // Using a controller to timeout after 3 seconds
+        // 2. Get GeoIP using ipwho.is
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 3000);
         
@@ -61,30 +63,32 @@ export const resolveLocation = async (host: string): Promise<string> => {
         
         const geoData = await geoRes.json();
 
-        if (geoData.success && geoData.country_code) {
-            const flag = getFlagEmoji(geoData.country_code);
-            updateCache(host, flag); // Cache by original host
-            return flag;
+        if (geoData.success) {
+            const data: LocationData = {
+                flag: getFlagEmoji(geoData.country_code),
+                country: geoData.country || '',
+                city: geoData.city || ''
+            };
+            updateCache(host, data); 
+            return data;
         }
     } catch (e) {
         console.warn(`Failed to resolve location for ${host}`, e);
     }
 
-    // Cache empty string to avoid retrying failed hosts repeatedly in same session? 
-    // Maybe better not to cache failures permanently.
-    return ''; 
+    return null; 
 };
 
-export const batchResolve = async (hosts: string[]): Promise<Record<string, string>> => {
+export const batchResolve = async (hosts: string[]): Promise<Record<string, LocationData>> => {
     const uniqueHosts = [...new Set(hosts.filter(h => !!h))];
-    const results: Record<string, string> = {};
+    const results: Record<string, LocationData> = {};
     
-    // Concurrency control: process 3 hosts at a time to avoid rate limits
     const BATCH_SIZE = 3;
     for (let i = 0; i < uniqueHosts.length; i += BATCH_SIZE) {
         const batch = uniqueHosts.slice(i, i + BATCH_SIZE);
         await Promise.all(batch.map(async (host) => {
-            results[host] = await resolveLocation(host);
+            const res = await resolveLocation(host);
+            if (res) results[host] = res;
         }));
     }
     return results;
