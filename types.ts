@@ -23,8 +23,6 @@ export interface ProcessingOptions {
   enableALPN: boolean;
   addRandomAlias: boolean;
   addLocationFlag: boolean;
-  enableDNS: boolean;
-  customDNS: string;
   enableCDNIP: boolean;
   customCDN: string;
   customBaseName: string; // New field for user defined name
