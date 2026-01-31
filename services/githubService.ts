@@ -16,15 +16,19 @@ export const createOrUpdateGist = async (
     'Content-Type': 'application/json',
   };
 
-  const body = {
+  const baseBody = {
     description,
-    public: false, // Default to secret gist
     files: {
       [filename]: {
         content,
       },
     },
   };
+
+  // Only include 'public' field when creating a new Gist (POST)
+  const body = gistId 
+    ? baseBody 
+    : { ...baseBody, public: false };
 
   const url = gistId ? `${GITHUB_API_URL}/${gistId}` : GITHUB_API_URL;
   const method = gistId ? 'PATCH' : 'POST';
