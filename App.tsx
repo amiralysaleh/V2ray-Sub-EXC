@@ -124,7 +124,15 @@ const App: React.FC = () => {
       const res = await createOrUpdateGist(githubToken, filename, processed, desc, targetId);
       
       if (res.files[filename]?.raw_url) {
-        setResultUrl(res.files[filename].raw_url);
+        const rawUrl = res.files[filename].raw_url;
+        
+        // CRITICAL FIX: Convert specific commit URL to Permanent "HEAD" URL
+        // From: https://gist.../user/id/raw/LONG_HASH/sub.txt
+        // To:   https://gist.../user/id/raw/sub.txt
+        // This ensures the link stays exactly the same after updates.
+        const permanentUrl = rawUrl.replace(/\/raw\/[a-z0-9]+\//i, '/raw/');
+
+        setResultUrl(permanentUrl);
         
         // If created new, set the ID
         if (!targetId) {
@@ -362,7 +370,7 @@ const App: React.FC = () => {
               <div className="p-6 bg-green-500/5 border-t border-green-500/20">
                 <div className="flex flex-col sm:flex-row items-center gap-4">
                   <div className="flex-1 w-full">
-                    <label className="text-[10px] text-green-500 font-black uppercase tracking-widest block mb-2">Permanent Subscription URL</label>
+                    <label className="text-[10px] text-green-500 font-black uppercase tracking-widest block mb-2">Permanent Subscription URL (Static)</label>
                     <input 
                         readOnly 
                         value={resultUrl} 
