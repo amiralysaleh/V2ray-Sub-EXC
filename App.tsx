@@ -231,6 +231,15 @@ const App: React.FC = () => {
                         onChange={(e) => setOptions({...options, customCDN: e.target.value})} 
                         className="w-full bg-gray-950/50 border border-yellow-800/50 rounded px-2 py-1.5 text-xs text-yellow-300 font-mono outline-none focus:border-yellow-500/50"
                       />
+                    <a 
+                      href="https://drunkleen.github.io/ip-scanner/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-2 w-full py-2 bg-yellow-900/30 hover:bg-yellow-900/50 border border-yellow-700/50 rounded-lg text-xs text-yellow-500 font-bold transition-all"
+                    >
+                      <Search size={14} />
+                      Find Clean Cloudflare IPs
+                    </a>
                   </div>
                 )}
               </div>
