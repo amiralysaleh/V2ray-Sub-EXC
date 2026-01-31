@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { processConfigs, getTehranDate, parseSubscription } from './services/v2rayService';
 import { createOrUpdateGist } from './services/githubService';
 import { generateSmartDescription } from './services/geminiService';
@@ -37,6 +37,27 @@ const App: React.FC = () => {
     customCDN: ''
   });
 
+  // Automatically detect Gist ID when URL changes
+  useEffect(() => {
+    if (!importUrl.trim()) {
+        setGistId(undefined);
+        return;
+    }
+    
+    // Look for standard 32-char hex ID in Gist URLs
+    if (importUrl.includes('gist.github')) {
+        const match = importUrl.match(/([0-9a-f]{32})/i);
+        if (match) {
+            const detectedId = match[1];
+            if (gistId !== detectedId) {
+                setGistId(detectedId);
+                // Optional: We can't log inside render/effect loop easily without cluttering, 
+                // but the UI badge updates immediately.
+            }
+        }
+    }
+  }, [importUrl, gistId]);
+
   const addLog = (type: LogEntry['type'], message: string) => {
     setLogs(prev => [{ type, message, timestamp: new Date() }, ...prev]);
   };
@@ -53,11 +74,8 @@ const App: React.FC = () => {
       setInputConfigs(decoded);
       addLog('success', 'کانفیگ‌ها با موفقیت دریافت شدند.');
       
-      // Improved Regex to catch both Raw and Standard Gist URLs
-      const gistMatch = importUrl.match(/(?:gist\.githubusercontent\.com|gist\.github\.com)\/[^/]+\/([a-f0-9]+)/);
-      if (gistMatch) {
-        setGistId(gistMatch[1]);
-        addLog('info', `شناسایی سابسکریپشن قدیمی (ID: ${gistMatch[1].substring(0,6)}...)`);
+      if (gistId) {
+        addLog('info', `شناسایی سابسکریپشن قدیمی (ID: ${gistId.substring(0,6)}...)`);
       }
     } catch (e: any) {
       addLog('error', `خطا در ورود: ${e.message}`);
@@ -103,6 +121,7 @@ const App: React.FC = () => {
         // If we forced a new one, update the current ID to the new one
         if (!targetId || forceNew) {
             setGistId(res.id);
+            // Optionally update import URL to the new one? Maybe not to avoid confusion.
         }
         addLog('success', targetId ? 'اشتراک با موفقیت بروزرسانی شد.' : 'اشتراک جدید با موفقیت ساخته شد.');
       }
@@ -260,7 +279,7 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-2 text-[10px] font-bold text-blue-400 bg-blue-900/20 px-3 py-1.5 rounded-full border border-blue-900/50">
                     <GitMerge size={12} />
                     <span>TARGET: {gistId.substring(0, 8)}...</span>
-                    <button onClick={() => { setGistId(undefined); setResultUrl(''); }} className="hover:text-white"><Trash2 size={12} /></button>
+                    <button onClick={() => { setGistId(undefined); setImportUrl(''); setResultUrl(''); }} className="hover:text-white"><Trash2 size={12} /></button>
                 </div>
                 )}
             </div>
