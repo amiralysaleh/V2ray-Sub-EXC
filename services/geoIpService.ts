@@ -2,10 +2,9 @@ export interface LocationData {
   flag: string;
   country: string;
   city: string;
-  isp?: string;
 }
 
-const CACHE_KEY = 'v2ray_geoip_robust_v5';
+const CACHE_KEY = 'v2ray_geoip_full_cache_v2';
 
 // Helper to get cache from localStorage
 const getCache = (): Record<string, LocationData> => {
@@ -18,16 +17,12 @@ const getCache = (): Record<string, LocationData> => {
 const updateCache = (host: string, data: LocationData) => {
     const cache = getCache();
     cache[host] = data;
-    try {
-        localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
-    } catch (e) {
-        try { localStorage.clear(); } catch {}
-    }
+    localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
 };
 
 // Convert ISO country code to Emoji Flag
 const getFlagEmoji = (countryCode: string) => {
-    if (!countryCode) return '🏳️';
+    if (!countryCode) return '';
     const codePoints = countryCode
         .toUpperCase()
         .split('')
@@ -35,154 +30,72 @@ const getFlagEmoji = (countryCode: string) => {
     return String.fromCodePoint(...codePoints);
 };
 
-const isIP = (str: string) => {
-    return /^(\d{1,3}\.){3}\d{1,3}$/.test(str) || str.includes(':');
-};
-
-const isPrivateIP = (ip: string) => {
-    if (!isIP(ip)) return ip === 'localhost';
-    return /^(::f{4}:)?10\.|\.|(?:^127\.)|(?:^169\.254\.)|(?:^192\.168\.)|(?:^172\.(?:1[6-9]|2\d|3[0-1])\.)/.test(ip);
-};
-
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-// DNS Resolver (Cloudflare -> Google -> Fallback)
-const resolveDns = async (domain: string): Promise<string> => {
-    if (isIP(domain)) return domain; 
-    
-    try {
-        const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${domain}&type=A`, {
-            headers: { 'Accept': 'application/dns-json' }
-        });
-        const data = await res.json();
-        if (data.Answer?.[0]?.data) return data.Answer[0].data;
-    } catch {}
-
-    try {
-        const res = await fetch(`https://dns.google/resolve?name=${domain}&type=A`);
-        const data = await res.json();
-        if (data.Answer?.[0]?.data) return data.Answer[0].data;
-    } catch {}
-
-    return domain; // Return original if resolve fails
-};
-
-// Provider 1: IpWhoIs (Best data, Strict Rate Limit)
-const fetchIpWhoIs = async (target: string): Promise<LocationData | null> => {
-    try {
-        const res = await fetch(`https://ipwho.is/${target}?lang=en`);
-        const data = await res.json();
-        if (data.success) {
-            // Check if returned IP matches targeted IP (anti-spoofing)
-            if (isIP(target) && data.ip !== target) return null;
-            
-            return {
-                flag: getFlagEmoji(data.country_code),
-                country: data.country || '',
-                city: data.city || '',
-                isp: data.connection?.isp || ''
-            };
-        }
-    } catch {}
-    return null;
-};
-
-// Provider 2: GeoJS (Permissive, Fast, Good Fallback)
-const fetchGeoJS = async (target: string): Promise<LocationData | null> => {
-    try {
-        const res = await fetch(`https://get.geojs.io/v1/ip/geo/${target}.json`);
-        if (!res.ok) return null;
-        const data = await res.json();
-        if (data.country_code) {
-             return {
-                flag: getFlagEmoji(data.country_code),
-                country: data.country || data.country_code,
-                city: data.city || '',
-                isp: data.organization_name || ''
-            };
-        }
-    } catch {}
-    return null;
-};
-
-// Provider 3: V2Fly (V2Ray Specific, Reliable)
-const fetchV2Fly = async (target: string): Promise<LocationData | null> => {
-    try {
-        const res = await fetch(`https://api.v2fly.org/web/geoip?ip=${target}`);
-        const data = await res.json();
-        if (data.country) {
-            return {
-                flag: getFlagEmoji(data.country),
-                country: data.country,
-                city: '', 
-                isp: ''
-            };
-        }
-    } catch {}
-    return null;
-};
-
 export const resolveLocation = async (host: string): Promise<LocationData | null> => {
-    if (!host || host.length < 3) return null;
+    if (!host) return null;
     
-    // Cache Hit?
+    // Check local cache first
     const cache = getCache();
     if (cache[host]) return cache[host];
 
-    // Resolve IP
-    const ip = await resolveDns(host);
-    if (isPrivateIP(ip)) return null;
+    try {
+        let ip = host;
+        
+        // 1. Resolve DNS if it's a domain
+        if (/[a-zA-Z]/.test(host) && !host.includes(':')) {
+            try {
+                const dnsRes = await fetch(`https://dns.google/resolve?name=${host}&type=A`);
+                const dnsData = await dnsRes.json();
+                if (dnsData.Answer && dnsData.Answer.length > 0) {
+                    const aRecord = dnsData.Answer.find((r: any) => r.type === 1);
+                    if (aRecord) ip = aRecord.data;
+                }
+            } catch (dnsError) {
+                console.warn(`DNS lookup failed for ${host}`, dnsError);
+            }
+        }
 
-    // Check Cache with IP
-    if (ip !== host && cache[ip]) {
-        updateCache(host, cache[ip]);
-        return cache[ip];
-    }
+        // 2. Get GeoIP using ipwho.is
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        
+        // Add random param to avoid cache hits on the API side if needed
+        const geoRes = await fetch(`https://ipwho.is/${ip}?lang=en`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
+        const geoData = await geoRes.json();
 
-    // Try Providers
-    let result = await fetchGeoJS(ip); // Try GeoJS first (fastest/least restriction)
-    
-    if (!result) {
-        await delay(200);
-        result = await fetchIpWhoIs(ip); // Try IpWhoIs (better data)
-    }
-    
-    if (!result) {
-        await delay(200);
-        result = await fetchV2Fly(ip); // Last resort
-    }
-
-    if (result) {
-        updateCache(host, result);
-        if (ip !== host) updateCache(ip, result);
-        return result;
+        if (geoData.success) {
+            const data: LocationData = {
+                flag: getFlagEmoji(geoData.country_code),
+                country: geoData.country || '',
+                city: geoData.city || ''
+            };
+            updateCache(host, data); 
+            return data;
+        }
+    } catch (e) {
+        console.warn(`Failed to resolve location for ${host}`, e);
     }
 
     return null; 
 };
 
 export const batchResolve = async (hosts: string[]): Promise<Record<string, LocationData>> => {
-    const uniqueHosts = [...new Set(hosts.filter(h => !!h && !h.includes('localhost') && !h.includes('127.0.0.1')))];
+    const uniqueHosts = [...new Set(hosts.filter(h => !!h))];
     const results: Record<string, LocationData> = {};
     
-    // Process in smaller chunks to avoid total blocking but respect limits
-    // GeoJS handles concurrency well.
-    const CHUNK_SIZE = 3; 
-    
-    for (let i = 0; i < uniqueHosts.length; i += CHUNK_SIZE) {
-        const chunk = uniqueHosts.slice(i, i + CHUNK_SIZE);
-        const promises = chunk.map(async (host) => {
-            const data = await resolveLocation(host);
-            if (data) results[host] = data;
-        });
-        
-        await Promise.all(promises);
-        
-        // Small delay between chunks to be polite
-        if (i + CHUNK_SIZE < uniqueHosts.length) {
-            await delay(300);
-        }
+    // Reduced batch size and added delay to avoid rate limits (which cause incorrect location data)
+    const BATCH_SIZE = 2;
+    for (let i = 0; i < uniqueHosts.length; i += BATCH_SIZE) {
+        const batch = uniqueHosts.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(async (host) => {
+            // Small jitter
+            await new Promise(r => setTimeout(r, Math.random() * 300));
+            const res = await resolveLocation(host);
+            if (res) results[host] = res;
+        }));
+        // Delay between batches
+        await new Promise(r => setTimeout(r, 800));
     }
-    
     return results;
 };
