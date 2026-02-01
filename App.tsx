@@ -4,7 +4,7 @@ import { createOrUpdateGist } from './services/githubService';
 import { generateSmartDescription } from './services/geminiService';
 import { Toggle } from './components/Toggle';
 import { ProcessingOptions, LogEntry } from './types';
-import { Activity, Link as LinkIcon, Terminal, AlertTriangle, Download, GitMerge, RefreshCw, Trash2, Settings2, Globe, Cloud, Network, Search, Plus, Save, PenTool } from 'lucide-react';
+import { Activity, Link as LinkIcon, Terminal, AlertTriangle, Download, GitMerge, RefreshCw, Trash2, Settings2, Globe, Cloud, Network, Search, Plus, Save, PenTool, X } from 'lucide-react';
 
 const App: React.FC = () => {
   const githubToken = (import.meta as any).env?.VITE_GITHUB_TOKEN || '';
@@ -19,6 +19,7 @@ const App: React.FC = () => {
   // Import/Edit State
   const [importUrl, setImportUrl] = useState('');
   const [gistId, setGistId] = useState(''); 
+  const [isManualGistId, setIsManualGistId] = useState(false); // Toggle for Gist ID input
   
   // Processing Options
   const [options, setOptions] = useState<ProcessingOptions>({
@@ -117,6 +118,7 @@ const App: React.FC = () => {
 
     if (isUpdate && !gistId.trim()) {
         addLog('error', 'برای آپدیت، شناسه Gist ID الزامی است. لطفا آن را وارد کنید یا گزینه "Create New" را بزنید.');
+        setIsManualGistId(true); // Auto open the field if missing
         return;
     }
 
@@ -237,7 +239,7 @@ const App: React.FC = () => {
                           </g>
                         </g>
                         <g id="path34">
-                          <path d="M421.37,385.37c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Z"/>
+                          <path d="M421.37,385.37c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Zm6.84,0c.16,2.41,.99,6.26,1.94,7.37-3.68-.53-3.86-4.96-4.32-7.28l2.37-.09h.01Z"/>
                         </g>
                       </g>
                       <g id="g58">
@@ -418,18 +420,39 @@ const App: React.FC = () => {
                   <Terminal className="text-primary-500" size={24} /> Input Source
                 </h2>
                 
-                {/* Gist ID Input - Visible now */}
-                <div className="flex items-center gap-2 w-full sm:w-auto bg-gray-950/80 rounded-lg border border-gray-800 focus-within:border-blue-500/50 px-2 py-1.5 transition-all">
-                    <GitMerge size={14} className="text-blue-500" />
-                    <input 
-                        type="text" 
-                        placeholder="Gist ID (Optional/Auto)" 
-                        value={gistId}
-                        onChange={(e) => setGistId(e.target.value.trim())}
-                        className="bg-transparent border-none text-[11px] font-mono text-blue-300 placeholder:text-gray-600 focus:outline-none w-full sm:w-48"
-                    />
-                    {gistId && (
-                        <button onClick={() => setGistId('')} className="text-gray-600 hover:text-red-400"><Trash2 size={12} /></button>
+                {/* Gist ID Input / Auto Toggle */}
+                <div className="w-full sm:w-auto flex justify-end">
+                    {isManualGistId ? (
+                        <div className="flex items-center gap-2 w-full sm:w-auto bg-gray-950/80 rounded-lg border border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)] px-2 py-1.5 transition-all">
+                            <GitMerge size={14} className="text-blue-500" />
+                            <input 
+                                type="text" 
+                                placeholder="Paste Gist ID here..." 
+                                value={gistId}
+                                onChange={(e) => setGistId(e.target.value.trim())}
+                                className="bg-transparent border-none text-[11px] font-mono text-blue-300 placeholder:text-gray-600 focus:outline-none w-full sm:w-48"
+                                autoFocus
+                            />
+                            <button 
+                                onClick={() => setIsManualGistId(false)} 
+                                className="text-gray-500 hover:text-gray-300 text-[10px] bg-gray-800/50 px-1.5 py-0.5 rounded"
+                                title="Switch back to Auto Mode"
+                            >
+                                Auto
+                            </button>
+                        </div>
+                    ) : (
+                        <button 
+                          onClick={() => setIsManualGistId(true)}
+                          className="group flex items-center gap-2 bg-gray-900/50 hover:bg-gray-900 border border-gray-800 hover:border-blue-500/30 rounded-lg px-3 py-1.5 transition-all"
+                          title="Click to manually set Gist ID"
+                        >
+                            <div className={`w-2 h-2 rounded-full ${gistId ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-gray-600'}`}></div>
+                            <span className="text-[11px] font-mono text-gray-400 group-hover:text-blue-300">
+                                {gistId ? `ID: ${gistId.substring(0, 6)}...` : 'Gist ID: Auto'}
+                            </span>
+                            <Settings2 size={12} className="text-gray-600 group-hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </button>
                     )}
                 </div>
             </div>
