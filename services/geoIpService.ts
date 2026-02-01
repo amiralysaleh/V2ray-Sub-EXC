@@ -5,7 +5,7 @@ export interface LocationData {
   isp?: string;
 }
 
-const CACHE_KEY = 'v2ray_geoip_robust_v3';
+const CACHE_KEY = 'v2ray_geoip_robust_v4';
 
 // Helper to get cache from localStorage
 const getCache = (): Record<string, LocationData> => {
@@ -36,40 +36,63 @@ const getFlagEmoji = (countryCode: string) => {
     return String.fromCodePoint(...codePoints);
 };
 
+// Check if string is an IP address
+const isIP = (str: string) => {
+    return /^(\d{1,3}\.){3}\d{1,3}$/.test(str) || str.includes(':');
+};
+
 // Check if IP is private/local
 const isPrivateIP = (ip: string) => {
-    return /^(::f{4}:)?10\.|\.|(?:^127\.)|(?:^169\.254\.)|(?:^192\.168\.)|(?:^172\.(?:1[6-9]|2\d|3[0-1])\.)/.test(ip) || ip === 'localhost';
+    // If it's a domain name (not an IP), we assume it's public for now, 
+    // unless it matches localhost.
+    if (!isIP(ip)) return ip === 'localhost';
+
+    return /^(::f{4}:)?10\.|\.|(?:^127\.)|(?:^169\.254\.)|(?:^192\.168\.)|(?:^172\.(?:1[6-9]|2\d|3[0-1])\.)/.test(ip);
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// DNS Resolver using Cloudflare (more robust CORS headers than Google sometimes)
+// DNS Resolver using Cloudflare (More robust than Google in restricted networks)
 const resolveDns = async (domain: string): Promise<string | null> => {
-    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(domain) || domain.includes(':')) return domain; // Already an IP
+    if (isIP(domain)) return domain; 
     
     try {
-        const res = await fetch(`https://dns.google/resolve?name=${domain}&type=A`);
+        const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${domain}&type=A`, {
+            headers: { 'Accept': 'application/dns-json' }
+        });
         const data = await res.json();
         if (data.Answer && data.Answer.length > 0) {
-            // Prefer type 1 (A Record)
             const rec = data.Answer.find((r: any) => r.type === 1);
             return rec ? rec.data : null;
         }
     } catch (e) {
-        // console.warn('DNS Error', e);
+        // Fallback to Google if Cloudflare fails
+        try {
+            const res = await fetch(`https://dns.google/resolve?name=${domain}&type=A`);
+            const data = await res.json();
+            if (data.Answer && data.Answer.length > 0) {
+                const rec = data.Answer.find((r: any) => r.type === 1);
+                return rec ? rec.data : null;
+            }
+        } catch (e2) {}
     }
     return null;
 };
 
 // Provider 1: ipwho.is (Detailed, strict rate limit)
-const fetchIpWhoIs = async (ip: string): Promise<LocationData | null> => {
+const fetchIpWhoIs = async (target: string): Promise<LocationData | null> => {
     try {
-        const res = await fetch(`https://ipwho.is/${ip}?lang=en`);
+        const res = await fetch(`https://ipwho.is/${target}?lang=en`);
         const data = await res.json();
         
         // Critical: ipwho.is returns the user's IP if the requested IP is invalid or rate limited.
-        // We MUST verify that the returned IP matches the requested IP.
-        if (data.success && data.ip === ip) {
+        if (data.success) {
+            // If we queried a specific IP, the response IP must match.
+            // If we queried a domain, the response IP is the resolved IP. 
+            // We can't strict match domain vs IP, but if we queried an IP, we MUST match.
+            if (isIP(target) && data.ip !== target) {
+                return null;
+            }
             return {
                 flag: getFlagEmoji(data.country_code),
                 country: data.country || '',
@@ -82,9 +105,11 @@ const fetchIpWhoIs = async (ip: string): Promise<LocationData | null> => {
 };
 
 // Provider 2: V2Fly GeoIP (Backup, very reliable, less info)
-const fetchV2Fly = async (ip: string): Promise<LocationData | null> => {
+const fetchV2Fly = async (target: string): Promise<LocationData | null> => {
     try {
-        const res = await fetch(`https://api.v2fly.org/web/geoip?ip=${ip}`);
+        // V2Fly API usually expects an IP, but sometimes handles hostnames. 
+        // Best to feed it IP if possible.
+        const res = await fetch(`https://api.v2fly.org/web/geoip?ip=${target}`);
         const data = await res.json();
         // data format: { country: "US", ip: "..." }
         if (data.country) {
@@ -106,33 +131,37 @@ export const resolveLocation = async (host: string): Promise<LocationData | null
     const cache = getCache();
     if (cache[host]) return cache[host];
 
-    // 2. Resolve DNS to IP
-    // We resolve DNS first to ensure we are querying an IP. 
-    // This helps avoid rate limits on "domain lookup" endpoints and allows verifying the response IP.
-    const ip = await resolveDns(host);
+    // 2. Resolve DNS
+    // We try to resolve to IP to get accurate GeoIP and avoid rate-limit-redirect-to-localhost issues.
+    let target = await resolveDns(host);
     
-    if (!ip || isPrivateIP(ip)) return null;
+    // Fallback: If DNS blocked/fails, use the hostname directly
+    if (!target) {
+        target = host;
+    }
 
-    // Check cache again with resolved IP (optional but good optimization)
-    if (cache[ip]) {
-        updateCache(host, cache[ip]); // Link host to the cached IP data
-        return cache[ip];
+    if (isPrivateIP(target)) return null;
+
+    // Check cache with resolved IP
+    if (target !== host && cache[target]) {
+        updateCache(host, cache[target]);
+        return cache[target];
     }
 
     // 3. Try Providers Sequentially
     
     // Attempt 1: ipwho.is
-    let result = await fetchIpWhoIs(ip);
+    let result = await fetchIpWhoIs(target);
     
     // Attempt 2: V2Fly (Fallback)
     if (!result) {
-        await delay(500); // Slight backoff before fallback
-        result = await fetchV2Fly(ip);
+        await delay(500); 
+        result = await fetchV2Fly(target);
     }
 
     if (result) {
         updateCache(host, result);
-        updateCache(ip, result);
+        if (target !== host) updateCache(target, result);
         return result;
     }
 
@@ -143,25 +172,19 @@ export const batchResolve = async (hosts: string[]): Promise<Record<string, Loca
     const uniqueHosts = [...new Set(hosts.filter(h => !!h && h !== 'localhost' && h !== '127.0.0.1'))];
     const results: Record<string, LocationData> = {};
     
-    // Strict Sequential Processing
-    // Parallel requests trigger rate limits which cause "Same Flag" bug (API returning your own IP).
-    // We process one by one with a delay.
-    
     for (const host of uniqueHosts) {
         const data = await resolveLocation(host);
         if (data) {
             results[host] = data;
         }
+        
         // Adaptive Delay:
-        // If we hit cache, resolveLocation returns fast.
-        // If we fetch API, we need to wait to respect rate limits (approx 1.5s for ipwho.is free tier safety).
-        // Since we can't easily know if it was cached inside resolveLocation without refactoring return types,
-        // we assume a safe delay for everyone not in localStorage.
         const cache = getCache();
+        // If it wasn't cached, we likely made a network request. Wait to respect rate limits.
         if (!cache[host]) {
-            await delay(1200); // 1.2 seconds delay between network requests
+            await delay(800); // 0.8s delay (ipwho.is allows ~3 req/sec burst but safe is lower)
         } else {
-             await delay(50); // Minimal delay for cached items
+             await delay(20); // Negligible delay for cache
         }
     }
     
