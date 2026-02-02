@@ -25,7 +25,8 @@ export interface ProcessingOptions {
   addLocationFlag: boolean;
   enableCDNIP: boolean;
   customCDN: string;
-  customBaseName: string; // New field for user defined name
+  customBaseName: string;
+  outputFormat: 'base64' | 'json'; // New field
 }
 
 export interface LogEntry {
