@@ -420,10 +420,10 @@ export const processConfigs = async (input: string, options: ProcessingOptions):
           return convertLinkToXrayOutbound(line, options, index, loc);
       }).filter(o => o !== null);
 
-      // Return Base64 encoded Line-Delimited JSON (one compact JSON object per line)
-      // This is the correct format for "One by One" JSON subscription
+      // Return Line-Delimited JSON (one compact JSON object per line)
+      // Per user request: Do NOT Base64 encode this output.
       const jsonLines = outbounds.map(o => JSON.stringify(o)).join('\n');
-      return safeB64Encode(jsonLines);
+      return jsonLines;
   }
 
   // 3. Standard Base64 Subscription Mode
