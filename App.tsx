@@ -38,11 +38,9 @@ const App: React.FC = () => {
     outputFormat: 'base64'
   });
 
-  // Handle format change and update filename extension
+  // Handle format change
   const handleFormatChange = (format: 'base64' | 'json') => {
       setOptions(prev => ({ ...prev, outputFormat: format }));
-      const namePart = filename.split('.')[0] || 'sub';
-      setFilename(`${namePart}.${format === 'json' ? 'json' : 'txt'}`);
   };
 
   // Helper to extract Gist ID robustly
@@ -245,7 +243,7 @@ const App: React.FC = () => {
                  </div>
                  {options.outputFormat === 'json' && (
                      <p className="text-[10px] text-orange-400 mt-2 leading-relaxed">
-                         Generates a full <b>config.json</b> structure. Best for applying Mux/Fragment reliably. Import as "Custom Config" in clients.
+                         Generates a <b>JSON Subscription</b> (Base64). Contains full Xray configs to ensure Mux/Fragment work correctly.
                      </p>
                  )}
               </div>
