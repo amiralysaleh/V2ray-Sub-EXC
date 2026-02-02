@@ -92,7 +92,179 @@ const generateNewAlias = (
     return parts.join(' ');
 };
 
-// Process VMess Link
+// --- Xray JSON Converter Helpers ---
+
+// Converts any link to a standard Xray Outbound JSON object
+const convertLinkToXrayOutbound = (link: string, options: ProcessingOptions, index: number, loc: LocationData | undefined): any | null => {
+    try {
+        let protocol = '';
+        let settings = {};
+        let streamSettings: any = { network: 'tcp', security: 'none' };
+        let tag = '';
+        let mux = options.enableMux ? { enabled: true, concurrency: options.muxConcurrency } : undefined;
+
+        // Apply Fragment via sockopt if enabled
+        const sockopt: any = {};
+        if (options.enableFragment) {
+            sockopt.fragment = {
+                packets: "tlshello",
+                length: options.fragmentLength,
+                interval: options.fragmentInterval
+            };
+        }
+        // Always attach sockopt to streamSettings later
+
+        if (link.startsWith('vmess://')) {
+            protocol = 'vmess';
+            const b64 = link.replace('vmess://', '');
+            const config = JSON.parse(safeB64Decode(b64));
+            
+            tag = generateNewAlias(config.ps, index, loc, options);
+            
+            // Map VMess fields to Xray
+            const address = (options.enableCDNIP && options.customCDN && (config.net === 'ws' || config.net === 'grpc')) 
+                            ? options.customCDN 
+                            : config.add;
+            const port = parseInt(config.port);
+            
+            settings = {
+                vnext: [{
+                    address: address,
+                    port: port,
+                    users: [{
+                        id: config.id,
+                        alterId: parseInt(config.aid || '0'),
+                        security: config.scy || 'auto'
+                    }]
+                }]
+            };
+
+            streamSettings.network = config.net || 'tcp';
+            streamSettings.security = config.tls || 'none';
+            
+            const host = config.host || config.add;
+            const sni = config.sni || config.host || config.add;
+
+            if (config.net === 'ws') {
+                streamSettings.wsSettings = {
+                    path: config.path || '/',
+                    headers: { Host: host }
+                };
+            } else if (config.net === 'grpc') {
+                streamSettings.grpcSettings = {
+                    serviceName: config.path || ''
+                };
+            }
+
+            if (config.tls === 'tls') {
+                streamSettings.tlsSettings = {
+                    serverName: sni,
+                    allowInsecure: options.allowInsecure,
+                    alpn: options.enableALPN ? ['h2', 'http/1.1'] : undefined,
+                    fingerprint: config.fp || undefined
+                };
+            }
+
+        } else if (link.startsWith('vless://') || link.startsWith('trojan://')) {
+            const url = new URL(link);
+            protocol = link.startsWith('vless://') ? 'vless' : 'trojan';
+            tag = generateNewAlias(decodeURIComponent(url.hash.slice(1)), index, loc, options);
+            
+            const originalHost = url.hostname;
+            const params = url.searchParams;
+            const net = params.get('type') || params.get('mode') || 'tcp';
+            const security = params.get('security') || 'none';
+            
+            const useCDN = options.enableCDNIP && options.customCDN && (net === 'ws' || net === 'grpc');
+            const address = useCDN ? options.customCDN : originalHost;
+            const port = parseInt(url.port);
+
+            // User Settings
+            if (protocol === 'vless') {
+                settings = {
+                    vnext: [{
+                        address: address,
+                        port: port,
+                        users: [{
+                            id: url.username,
+                            encryption: params.get('encryption') || 'none',
+                            level: 0
+                        }]
+                    }]
+                };
+            } else {
+                settings = {
+                    servers: [{
+                        address: address,
+                        port: port,
+                        password: url.username,
+                        level: 0
+                    }]
+                };
+            }
+
+            streamSettings.network = net;
+            streamSettings.security = security;
+            
+            const host = params.get('host') || originalHost;
+            const sni = params.get('sni') || host;
+            const path = params.get('path') || params.get('serviceName') || '/';
+
+            if (net === 'ws') {
+                streamSettings.wsSettings = {
+                    path: path,
+                    headers: { Host: host }
+                };
+            } else if (net === 'grpc') {
+                streamSettings.grpcSettings = {
+                    serviceName: path
+                };
+            }
+
+            if (security === 'tls') {
+                streamSettings.tlsSettings = {
+                    serverName: sni,
+                    allowInsecure: options.allowInsecure,
+                    alpn: options.enableALPN ? ['h2', 'http/1.1'] : undefined,
+                    fingerprint: params.get('fp') || undefined
+                };
+            } else if (security === 'reality') {
+                streamSettings.realitySettings = {
+                    serverName: sni,
+                    publicKey: params.get('pbk'),
+                    shortId: params.get('sid'),
+                    fingerprint: params.get('fp') || 'chrome',
+                    spiderX: params.get('spx') || ''
+                };
+            }
+        } else if (link.startsWith('ss://')) {
+             // Basic SS support for JSON
+             // Parsing SS is complex due to various formats (legacy/SIP002)
+             // We'll skip deep implementation to keep it safe, or return basic
+             return null; // Skipping SS for JSON export for now to ensure stability
+        } else {
+            return null; 
+        }
+
+        // Attach Sockopt
+        streamSettings.sockopt = sockopt;
+
+        return {
+            tag: tag,
+            protocol: protocol,
+            settings: settings,
+            streamSettings: streamSettings,
+            mux: mux
+        };
+
+    } catch (e) {
+        console.error("Error converting link to JSON", e);
+        return null;
+    }
+};
+
+
+// Process VMess Link (Legacy Base64 Mode)
 const processVmess = (link: string, options: ProcessingOptions, index: number, loc: LocationData | undefined): string => {
   try {
     const b64Part = link.replace('vmess://', '');
@@ -101,25 +273,13 @@ const processVmess = (link: string, options: ProcessingOptions, index: number, l
 
     const config = JSON.parse(jsonStr);
 
-    // Apply Custom CDN IP
-    // Logic: If net is WS/GRPC, swap address with CDN, but KEEP original host in "host" and "sni"
     if (options.enableCDNIP && options.customCDN && (config.net === 'ws' || config.net === 'grpc')) {
         const originalAddress = config.add;
         config.add = options.customCDN;
-        
-        // Preserve Host header: If empty, use original address
-        if (!config.host || config.host.length === 0) {
-            config.host = originalAddress;
-        }
-        
-        // Preserve SNI: If empty and using TLS, use original address
-        if (config.tls === 'tls' && (!config.sni || config.sni.length === 0)) {
-            config.sni = originalAddress;
-        }
+        if (!config.host || config.host.length === 0) config.host = originalAddress;
+        if (config.tls === 'tls' && (!config.sni || config.sni.length === 0)) config.sni = originalAddress;
     }
 
-    // Apply Mux
-    // Logic: Inject standard Mux object for clients that support it
     if (options.enableMux) {
        config.mux = {
            enabled: true,
@@ -127,23 +287,10 @@ const processVmess = (link: string, options: ProcessingOptions, index: number, l
        };
     }
 
-    // Allow Insecure
-    // Logic: Do NOT force TLS. Only set verify param if TLS is already active.
-    // 'skip-cert-verify' isn't standard in V2RayN JSON but 'verify_cert' sometimes is.
-    // To be safe and avoid breaking, we mostly rely on clients global settings, 
-    // but we can ensure we don't accidentally enable strict checking.
-    // We removed the breaking `config.tls="tls"` line here.
-
-    // Optimize ALPN
     if (options.enableALPN && config.tls === 'tls') {
         config.alpn = "h2,http/1.1";
     }
 
-    // Global DNS
-    // Logic: Removed. DNS is a client-side setting, not a per-proxy setting in VMess JSON.
-    // Adding it typically does nothing or causes parse errors.
-
-    // NEW NAMING LOGIC
     config.ps = generateNewAlias(config.ps, index, loc, options);
 
     return 'vmess://' + safeB64Encode(JSON.stringify(config));
@@ -165,12 +312,8 @@ const processSSR = (link: string, options: ProcessingOptions, index: number, loc
     const paramsStr = splitUrl[1] || '';
     const params = new URLSearchParams(paramsStr);
     
-    // NEW NAMING LOGIC
     const newAlias = generateNewAlias("SSR", index, loc, options);
     params.set('remarks', safeBase64UrlEncode(newAlias));
-
-    // SSR doesn't support modern V2Ray params (Mux, Fragment, etc) in link
-    // We only touch the name.
 
     const newDecoded = `${mainPart}/?${params.toString()}`;
     return 'ssr://' + safeBase64UrlEncode(newDecoded);
@@ -186,7 +329,6 @@ const processUrlBased = (link: string, options: ProcessingOptions, index: number
     let urlObj: URL;
     let originalLink = link;
 
-    // Fix SS links without full URL structure
     if (link.startsWith('ss://') && !link.includes('@') && !link.includes('?')) {
         const hashIndex = link.indexOf('#');
         let b64 = link.substring(5, hashIndex > -1 ? hashIndex : undefined);
@@ -209,7 +351,6 @@ const processUrlBased = (link: string, options: ProcessingOptions, index: number
     
     const params = urlObj.searchParams;
 
-    // Apply Custom CDN IP
     const type = params.get('type');
     const serviceName = params.get('serviceName');
     const isWsOrGrpc = type === 'ws' || type === 'grpc' || params.get('mode') === 'grpc' || !!serviceName;
@@ -217,40 +358,26 @@ const processUrlBased = (link: string, options: ProcessingOptions, index: number
     if (options.enableCDNIP && options.customCDN && isWsOrGrpc) {
         const originalHost = urlObj.hostname;
         urlObj.hostname = options.customCDN;
-        
-        // Ensure Host is preserved
-        if (!params.has('host')) {
-            params.set('host', originalHost);
-        }
-        
-        // Ensure SNI is preserved (if TLS is involved)
+        if (!params.has('host')) params.set('host', originalHost);
         const security = params.get('security');
         if (!params.has('sni') && (security === 'tls' || security === 'reality' || security === 'xtls')) {
             params.set('sni', originalHost);
         }
     }
 
-    // Apply Mux
-    // Note: 'mux' query param is supported by v2rayNG/v2rayN but not standard Xray-core.
-    // We keep it as it's a requested feature for mobile clients.
     if (options.enableMux) {
       params.set('mux', 'true');
       params.set('concurrency', options.muxConcurrency.toString());
     }
 
-    // Fragment
-    // Note: Supported by v2rayNG/V2Box
     if (options.enableFragment) {
       params.set('fragment', `${options.fragmentLength},${options.fragmentInterval},random`);
     }
 
-    // Insecure
-    // Standard query param for VLESS/Trojan
     if (options.allowInsecure) {
       params.set('allowInsecure', '1');
     }
 
-    // Optimize ALPN
     if (options.enableALPN) {
         const security = params.get('security');
         if (security === 'tls' || security === 'reality' || security === 'xtls') {
@@ -258,10 +385,6 @@ const processUrlBased = (link: string, options: ProcessingOptions, index: number
         }
     }
 
-    // Global DNS
-    // Removed to prevent link corruption. DNS is a client setting.
-
-    // NEW NAMING LOGIC
     const newAlias = generateNewAlias("Config", index, loc, options);
     urlObj.hash = encodeURIComponent(newAlias);
 
@@ -286,7 +409,28 @@ export const processConfigs = async (input: string, options: ProcessingOptions):
       hostLocationMap = await batchResolve(hosts);
   }
 
-  // 2. Process each line
+  // 2. JSON Export Mode (Universal Config)
+  if (options.outputFormat === 'json') {
+      const outbounds = lines.map((line, index) => {
+          let host: string | null = null;
+          if (line.startsWith('vmess://')) host = getHostFromVmess(line);
+          else host = getHostFromUrl(line);
+          
+          const loc = (host && hostLocationMap[host]) ? hostLocationMap[host] : undefined;
+          return convertLinkToXrayOutbound(line, options, index, loc);
+      }).filter(o => o !== null);
+
+      const jsonConfig = {
+          remarks: "Generated by V2Ray SubManager",
+          log: { loglevel: "warning" },
+          outbounds: outbounds
+      };
+      
+      // Return pretty-printed JSON string (Not Base64)
+      return JSON.stringify(jsonConfig, null, 2);
+  }
+
+  // 3. Standard Base64 Subscription Mode
   const processedLines = lines.map((line, index) => {
     let host: string | null = null;
     if (line.startsWith('vmess://')) host = getHostFromVmess(line);
