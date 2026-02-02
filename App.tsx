@@ -243,7 +243,7 @@ const App: React.FC = () => {
                  </div>
                  {options.outputFormat === 'json' && (
                      <p className="text-[10px] text-orange-400 mt-2 leading-relaxed">
-                         Generates a <b>JSON Subscription</b> (Base64). Contains full Xray configs to ensure Mux/Fragment work correctly.
+                         Generates a <b>JSON Subscription</b> (Raw Text). Contains full Xray configs to ensure Mux/Fragment work correctly.
                      </p>
                  )}
               </div>
