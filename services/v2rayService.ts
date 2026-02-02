@@ -409,7 +409,7 @@ export const processConfigs = async (input: string, options: ProcessingOptions):
       hostLocationMap = await batchResolve(hosts);
   }
 
-  // 2. JSON Export Mode (Universal Config)
+  // 2. JSON Export Mode (Universal Config - Line Delimited)
   if (options.outputFormat === 'json') {
       const outbounds = lines.map((line, index) => {
           let host: string | null = null;
@@ -420,8 +420,10 @@ export const processConfigs = async (input: string, options: ProcessingOptions):
           return convertLinkToXrayOutbound(line, options, index, loc);
       }).filter(o => o !== null);
 
-      // We return a Base64 encoded JSON Array of outbounds (Subscription format with JSON content)
-      return safeB64Encode(JSON.stringify(outbounds, null, 2));
+      // Return Base64 encoded Line-Delimited JSON (one compact JSON object per line)
+      // This is the correct format for "One by One" JSON subscription
+      const jsonLines = outbounds.map(o => JSON.stringify(o)).join('\n');
+      return safeB64Encode(jsonLines);
   }
 
   // 3. Standard Base64 Subscription Mode
