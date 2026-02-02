@@ -189,43 +189,15 @@ const App: React.FC = () => {
         {/* Header Section */}
         <div className="lg:col-span-3 flex flex-col md:flex-row items-center justify-between mb-2 border-b border-gray-800 pb-6">
           <div className="flex items-center gap-6 mb-4 md:mb-0">
-            {/* Custom Iran Flag 1964 Logo */}
+            {/* Custom Logo */}
             <div className="relative w-24 h-16 rounded-xl overflow-hidden shadow-2xl shadow-green-900/40 border border-white/10 group hover:scale-105 transition-transform duration-500">
-                <svg id="Flag_of_Iran_1964" data-name="Flag of Iran 1964" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1050.01 600.01" className="w-full h-full object-cover">
-                  <defs>
-                    <style>{`
-                      .cls-1 { fill: #fff; }
-                      .cls-2 { fill: #ffbb26; }
-                      .cls-3 { fill: #da0000; }
-                      .cls-4 { fill: #239f40; }
-                    `}</style>
-                  </defs>
-                  <rect className="cls-4" width="1050.01" height="600.01"/>
-                  <rect className="cls-1" y="200" width="1050.01" height="400"/>
-                  <rect className="cls-3" y="400" width="1050.01" height="200"/>
-                  <g id="layer1">
-                    <g id="g60">
-                      <g id="g36">
-                        <g id="path8">
-                          <path className="cls-2" d="M408.9,302s-2.83-30.54,3.26-49.28c4.2-12.93,10.69-23.53,21.18-32.17,16.39-13.5,41.7-17.06,59.46-8.96-15.55,.81-36.37,6.06-47.65,15.48-8.64,7.21-15.39,17.35-18.73,28.1-5.68,18.28-2.85,47.65-2.85,47.65l-14.66-.81h0Z"/>
-                          <path d="M424.53,303.74l-16.43-.91-.07-.75c-.03-.31-2.77-30.94,3.3-49.63,4.51-13.88,11.33-24.24,21.45-32.58,8-6.59,18.53-11.13,29.64-12.77,11.03-1.63,21.95-.32,30.74,3.69l3.25,1.48-3.57,.19c-14.82,.78-35.88,5.89-47.13,15.27-8.46,7.06-15.19,17.15-18.46,27.69-5.56,17.9-2.84,47.01-2.82,47.3l.1,1.01h0Zm-14.82-2.57l12.9,.72c-.43-5.35-2.1-30.66,2.97-46.98,3.37-10.85,10.3-21.24,19.01-28.51,5.3-4.42,13.09-8.27,22.53-11.13,7.02-2.13,14.65-3.61,21.86-4.28-7.81-2.76-17-3.53-26.29-2.16-10.8,1.6-21.02,6-28.79,12.39-9.86,8.12-16.5,18.21-20.9,31.77-5.43,16.73-3.66,43.38-3.28,48.18h0Z"/>
-                        </g>
-                        <g id="path10">
-                          <path d="M419.98,252.06c-5.25,15.85-5.25,33.33-4.73,48.35l1.95-.08c-.52-14.95-.4-32.19,4.65-47.66s14.95-29.17,34.25-37.32c-23.04,5.18-33.42,28.54-36.13,36.71h.01Z"/>
-                        </g>
-                        <g id="g32">
-                          <g id="path12">
-                            <path className="cls-2" d="M408.78,290.51h14.01v31.42h-14.01v-31.42Z"/>
-                            <path d="M423.67,322.8h-15.76v-33.17h15.76v33.17Zm-14.01-1.75h12.26v-29.67h-12.26v29.67Z"/>
-                          </g>
-                        </g>
-                        {/* Simplified remaining paths for brevity while keeping visual integrity */}
-                      </g>
-                    </g>
-                  </g>
-                </svg>
+                <img 
+                  src="https://flagofiran.com/files/Flag_of_Iran.svg" 
+                  alt="Flag of Iran" 
+                  className="w-full h-full object-cover" 
+                />
                 {/* Gloss Effect */}
-                <div className="absolute inset-0 bg-gradient-to-tr from-black/10 to-transparent pointer-events-none"></div>
+                <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent pointer-events-none"></div>
             </div>
             <div>
               <h1 className="text-3xl font-black bg-clip-text text-transparent bg-gradient-to-r from-green-400 via-white to-red-500 tracking-tight drop-shadow-sm">
