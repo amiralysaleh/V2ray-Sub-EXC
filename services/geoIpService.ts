@@ -1,10 +1,10 @@
 export interface LocationData {
   flag: string;
   country: string;
-  city: string;
+  city: string; // Kept for interface compatibility, but empty string is used if not needed
 }
 
-const CACHE_KEY = 'v2ray_geoip_full_cache_v3'; // Incremented cache version
+const CACHE_KEY = 'v2ray_geoip_cache_v4'; // Incremented cache version
 
 // Helper to get cache from localStorage
 const getCache = (): Record<string, LocationData> => {
@@ -30,82 +30,108 @@ const getFlagEmoji = (countryCode: string) => {
     return String.fromCodePoint(...codePoints);
 };
 
+// Validate if string is likely a resolvable host
+const isValidHost = (host: string): boolean => {
+    if (!host || host.length < 3) return false;
+    if (host.includes('127.0.0.1') || host.includes('localhost') || host.includes('::1')) return false;
+    return true;
+};
+
 export const resolveLocation = async (host: string): Promise<LocationData | null> => {
-    if (!host) return null;
+    if (!isValidHost(host)) return null;
     
     // Check local cache first
     const cache = getCache();
     if (cache[host]) return cache[host];
 
-    try {
-        let ip = host;
-        
-        // 1. Resolve DNS if it's a domain
-        if (/[a-zA-Z]/.test(host) && !host.includes(':')) {
-            try {
-                const dnsRes = await fetch(`https://dns.google/resolve?name=${host}&type=A`);
-                const dnsData = await dnsRes.json();
-                if (dnsData.Answer && dnsData.Answer.length > 0) {
-                    const aRecord = dnsData.Answer.find((r: any) => r.type === 1);
-                    if (aRecord) ip = aRecord.data;
-                }
-            } catch (dnsError) {
-                console.warn(`DNS lookup failed for ${host}`, dnsError);
-                // Continue with host if DNS fails (sometimes api handles domain)
-            }
-        }
+    let targetIp = host;
 
-        // 2. Get GeoIP using ipwho.is
+    // 1. Resolve DNS if it's a domain (to get accurate server location, not CDN edge sometimes)
+    if (/[a-zA-Z]/.test(host) && !host.includes(':')) {
+        try {
+            const controller = new AbortController();
+            setTimeout(() => controller.abort(), 2000);
+            const dnsRes = await fetch(`https://dns.google/resolve?name=${host}&type=A`, { signal: controller.signal });
+            const dnsData = await dnsRes.json();
+            if (dnsData.Answer && dnsData.Answer.length > 0) {
+                const aRecord = dnsData.Answer.find((r: any) => r.type === 1);
+                if (aRecord) targetIp = aRecord.data;
+            }
+        } catch (e) {
+            // DNS failed, proceed with hostname directly
+        }
+    }
+
+    // 2. Try Primary Provider: ipwho.is (Detailed)
+    try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000); // Increased timeout
+        setTimeout(() => controller.abort(), 3000);
         
-        const geoRes = await fetch(`https://ipwho.is/${ip}?lang=en`, { 
+        const res = await fetch(`https://ipwho.is/${targetIp}?lang=en`, { 
             signal: controller.signal,
             referrerPolicy: 'no-referrer' 
         });
-        clearTimeout(timeoutId);
-        
-        const geoData = await geoRes.json();
+        const data = await res.json();
 
-        // CRITICAL CHECK: ensure 'success' is true. 
-        // If false, it means IP is private, reserved, or invalid. 
-        // Without this, ipwho.is might return the requester's info in some edge cases.
-        if (geoData.success) {
-            const data: LocationData = {
-                flag: getFlagEmoji(geoData.country_code),
-                country: geoData.country || '',
-                city: geoData.city || ''
+        if (data.success) {
+            const result: LocationData = {
+                flag: getFlagEmoji(data.country_code),
+                country: data.country,
+                city: "" // Explicitly empty as requested
             };
-            updateCache(host, data); 
-            return data;
-        } else {
-             // Cache a null-like result to avoid retrying bad IPs? 
-             // For now, we just return null so it doesn't get a flag.
-             return null;
+            updateCache(host, result);
+            return result;
         }
     } catch (e) {
-        console.warn(`Failed to resolve location for ${host}`, e);
+        console.warn(`Primary GeoIP failed for ${host}, trying fallback...`);
+    }
+
+    // 3. Try Fallback Provider: geojs.io (Simple, Fast, HTTPS)
+    try {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 3000);
+
+        const res = await fetch(`https://get.geojs.io/v1/ip/country/full/${targetIp}.json`, {
+            signal: controller.signal
+        });
+        // Returns: {"name":"United States","alpha2":"US"}
+        const data = await res.json();
+        
+        if (data.name && data.alpha2) {
+            const result: LocationData = {
+                flag: getFlagEmoji(data.alpha2),
+                country: data.name,
+                city: ""
+            };
+            updateCache(host, result);
+            return result;
+        }
+    } catch (e) {
+        console.warn(`Fallback GeoIP failed for ${host}`);
     }
 
     return null; 
 };
 
 export const batchResolve = async (hosts: string[]): Promise<Record<string, LocationData>> => {
-    const uniqueHosts = [...new Set(hosts.filter(h => !!h))];
+    const uniqueHosts = [...new Set(hosts.filter(h => isValidHost(h)))];
     const results: Record<string, LocationData> = {};
     
-    // Batch size of 3 and delay of 1.2s to be very safe against Rate Limits
-    const BATCH_SIZE = 3;
+    // Increased batch size slightly as geojs is more tolerant
+    const BATCH_SIZE = 4;
+    
     for (let i = 0; i < uniqueHosts.length; i += BATCH_SIZE) {
         const batch = uniqueHosts.slice(i, i + BATCH_SIZE);
+        
         await Promise.all(batch.map(async (host) => {
-            // Small jitter to prevent exact simultaneous hits
-            await new Promise(r => setTimeout(r, Math.random() * 500));
             const res = await resolveLocation(host);
             if (res) results[host] = res;
         }));
-        // Significant delay between batches to respect free API tiers
-        await new Promise(r => setTimeout(r, 1200));
+        
+        // Small delay to be polite
+        if (i + BATCH_SIZE < uniqueHosts.length) {
+            await new Promise(r => setTimeout(r, 800));
+        }
     }
     return results;
 };
