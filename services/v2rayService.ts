@@ -73,11 +73,11 @@ const generateNewAlias = (
 ): string => {
     const parts: string[] = [];
 
-    // 1. Add Location Info (Flag + Country + City)
+    // 1. Add Location Info (Flag + Country ONLY - Removed City)
     if (location) {
         parts.push(location.flag);
         if (location.country) parts.push(location.country);
-        if (location.city) parts.push(location.city);
+        // City removed as per request
     }
 
     // 2. Add Custom Base Name (User Defined or Default "VS")
