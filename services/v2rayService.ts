@@ -43,43 +43,78 @@ export const parseSubscription = (content: string): string => {
     return decoded || content;
 };
 
+// --- Host Extraction Logic ---
+
 const getHostFromVmess = (link: string): string | null => {
     try {
         const b64Part = link.replace('vmess://', '');
         const jsonStr = safeB64Decode(b64Part);
         const config = JSON.parse(jsonStr);
-        return config.add || null;
+        // Valid VMess should have 'add' (address)
+        return config.add && config.add.trim().length > 0 ? config.add : null;
     } catch { return null; }
 };
 
-const getHostFromUrl = (link: string): string | null => {
+const getHostFromSSR = (link: string): string | null => {
     try {
-        // Handle SSR
-        if (link.startsWith('ssr://')) {
-             const b64 = link.replace('ssr://', '').split('/')[0];
-             const decoded = safeB64Decode(b64);
-             return decoded.split(':')[0] || null;
-        }
+        const b64 = link.replace(/^ssr:\/\//, '').split('/')[0]; // Remove query params first
+        const decoded = safeBase64UrlDecode(b64);
+        const parts = decoded.split(':');
+        return parts.length > 0 ? parts[0] : null;
+    } catch { return null; }
+};
 
+const getHostFromStandardUrl = (link: string): string | null => {
+    try {
         // Handle Legacy SS (Base64 encoded without @)
-        if (link.startsWith('ss://') && !link.includes('@') && !link.includes('?')) {
+        if (link.startsWith('ss://') && !link.includes('@')) {
             const hashIndex = link.indexOf('#');
             const b64 = link.substring(5, hashIndex > -1 ? hashIndex : undefined);
+            const hash = hashIndex > -1 ? link.substring(hashIndex) : '';
             try {
+                // Try decoding SIP002 legacy style
                 const decoded = safeBase64UrlDecode(b64);
-                // decoded format: method:password@ip:port
                 if (decoded.includes('@')) {
                    const parts = decoded.split('@');
-                   const addressPart = parts[parts.length - 1]; // ip:port
+                   const addressPart = parts[parts.length - 1]; // host:port
                    return addressPart.split(':')[0];
+                } else if (decoded.includes(':')) {
+                    // format: method:password@host:port (sometimes encoded fully)
+                    // OR format: host:port (very old)
+                    // It's ambiguous, but if it parses as URL logic below, good.
                 }
-            } catch (e) {}
+            } catch(e) {}
         }
 
-        // Handle Standard VLESS, Trojan, SS (user:pass@host:port)
+        // Standard URL parsing for VLESS, Trojan, and standard SS
+        // This handles: protocol://user@host:port...
         const url = new URL(link);
-        return url.hostname;
-    } catch { return null; }
+        
+        // Handle IPv6 literals in URL (e.g., [2001:db8::1])
+        let hostname = url.hostname;
+        
+        // If hostname is empty, it might be a malformed URL
+        if (!hostname) return null;
+        
+        // Remove brackets from IPv6 for cleaner handling
+        if (hostname.startsWith('[') && hostname.endsWith(']')) {
+            hostname = hostname.slice(1, -1);
+        }
+
+        return hostname;
+    } catch { 
+        return null; 
+    }
+};
+
+const extractHost = (link: string): string | null => {
+    link = link.trim();
+    if (link.startsWith('vmess://')) return getHostFromVmess(link);
+    if (link.startsWith('ssr://')) return getHostFromSSR(link);
+    if (link.startsWith('vless://') || link.startsWith('trojan://') || link.startsWith('ss://')) {
+        return getHostFromStandardUrl(link);
+    }
+    return null;
 };
 
 // --- Naming Logic Helper ---
@@ -92,9 +127,9 @@ const generateNewAlias = (
     const parts: string[] = [];
 
     // 1. Add Location Info (Flag + Country)
-    if (location) {
+    if (location && location.country) { // Ensure country exists
         parts.push(location.flag);
-        if (location.country) parts.push(location.country);
+        parts.push(location.country);
     }
 
     // 2. Add Custom Base Name
@@ -174,18 +209,18 @@ const processUrlBased = (link: string, options: ProcessingOptions, index: number
     let urlObj: URL;
     let originalLink = link;
 
-    if (link.startsWith('ss://') && !link.includes('@') && !link.includes('?')) {
-        const hashIndex = link.indexOf('#');
-        let b64 = link.substring(5, hashIndex > -1 ? hashIndex : undefined);
-        const hash = hashIndex > -1 ? link.substring(hashIndex) : '';
-        if (!b64.includes(':')) {
-           try {
-              const decoded = safeBase64UrlDecode(b64);
-              if (decoded.includes('@') && decoded.includes(':')) {
-                  originalLink = `ss://${decoded}${hash}`;
-              }
-           } catch(e) {}
-        }
+    // Pre-processing for legacy SS to ensure URL parsing works
+    if (link.startsWith('ss://') && !link.includes('@')) {
+         // Try to convert to standard format if possible for the URL parser
+         const hashIndex = link.indexOf('#');
+         const b64 = link.substring(5, hashIndex > -1 ? hashIndex : undefined);
+         const hash = hashIndex > -1 ? link.substring(hashIndex) : '';
+         try {
+             const decoded = safeBase64UrlDecode(b64);
+             if (decoded.includes('@')) {
+                 originalLink = `ss://${decoded}${hash}`;
+             }
+         } catch(e) {}
     }
 
     try {
@@ -246,20 +281,14 @@ export const processConfigs = async (input: string, options: ProcessingOptions):
   let hostLocationMap: Record<string, LocationData> = {};
   
   if (options.addLocationFlag) {
-      const hosts = lines.map(line => {
-          if (line.startsWith('vmess://')) return getHostFromVmess(line);
-          return getHostFromUrl(line);
-      }).filter((h): h is string => h !== null);
-      
+      // Extract hosts using the unified extractor
+      const hosts = lines.map(line => extractHost(line)).filter((h): h is string => h !== null);
       hostLocationMap = await batchResolve(hosts);
   }
 
-  // 2. Standard Base64 Subscription Mode
+  // 2. Process Lines
   const processedLines = lines.map((line, index) => {
-    let host: string | null = null;
-    if (line.startsWith('vmess://')) host = getHostFromVmess(line);
-    else host = getHostFromUrl(line);
-    
+    const host = extractHost(line);
     const loc = (host && hostLocationMap[host]) ? hostLocationMap[host] : undefined;
 
     if (line.startsWith('vmess://')) {
