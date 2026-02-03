@@ -4,7 +4,7 @@ export interface LocationData {
   city: string; // Kept for interface compatibility, but empty string is used if not needed
 }
 
-const CACHE_KEY = 'v2ray_geoip_cache_v4'; // Incremented cache version
+const CACHE_KEY = 'v2ray_geoip_cache_v5'; // Bumped version to force refresh
 
 // Helper to get cache from localStorage
 const getCache = (): Record<string, LocationData> => {
@@ -117,8 +117,8 @@ export const batchResolve = async (hosts: string[]): Promise<Record<string, Loca
     const uniqueHosts = [...new Set(hosts.filter(h => isValidHost(h)))];
     const results: Record<string, LocationData> = {};
     
-    // Increased batch size slightly as geojs is more tolerant
-    const BATCH_SIZE = 4;
+    // REDUCED Batch size to 2 to match ipwho.is rate limits (approx 2 req/sec safe)
+    const BATCH_SIZE = 2;
     
     for (let i = 0; i < uniqueHosts.length; i += BATCH_SIZE) {
         const batch = uniqueHosts.slice(i, i + BATCH_SIZE);
@@ -128,9 +128,9 @@ export const batchResolve = async (hosts: string[]): Promise<Record<string, Loca
             if (res) results[host] = res;
         }));
         
-        // Small delay to be polite
+        // Delay between batches
         if (i + BATCH_SIZE < uniqueHosts.length) {
-            await new Promise(r => setTimeout(r, 800));
+            await new Promise(r => setTimeout(r, 1000));
         }
     }
     return results;
