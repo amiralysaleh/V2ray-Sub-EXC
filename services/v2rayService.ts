@@ -114,6 +114,8 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
         let pbk = '';
         let sid = '';
         let spx = '';
+        // Alias is calculated for naming, but removed from JSON body as per request
+        // const alias = generateNewAlias(...) 
         
         // Parsing Logic
         if (link.startsWith('vmess://')) {
@@ -132,14 +134,13 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
             sni = config.sni || config.host || config.add;
             fingerprint = config.fp || '';
             
-            // AlterId is deprecated in newer Xray, usually 0
         } else if (link.startsWith('vless://') || link.startsWith('trojan://')) {
             protocol = link.startsWith('vless://') ? 'vless' : 'trojan';
             const url = new URL(link);
             
             address = url.hostname;
             port = parseInt(url.port);
-            id = url.username; // UUID or Password
+            id = url.username;
             
             const params = url.searchParams;
             security = params.get('security') || 'none';
@@ -161,11 +162,10 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
             return null; // Skip unsupported
         }
 
-        // --- 2. Apply Customizations (CDN, ALPN, etc.) ---
+        // --- 2. Apply Customizations ---
         
         // CDN Override
         if (options.enableCDNIP && options.customCDN && (net === 'ws' || net === 'grpc')) {
-             // Keep SNI/Host as original, change address to CDN
              if (!host) host = address;
              if (!sni && (security === 'tls' || security === 'reality')) sni = address;
              address = options.customCDN;
@@ -173,10 +173,10 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
 
         // ALPN
         if (options.enableALPN && (security === 'tls' || security === 'reality')) {
-            alpn = ['h2', 'http/1.1'];
+            alpn = ['http/1.1']; // Matches user template which used "http/1.1" inside array
         }
 
-        // --- 3. Build "Proxy" Outbound ---
+        // --- 3. Build Proxy Outbound ---
         
         const proxySettings: any = {};
         
@@ -196,9 +196,9 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
                 address: address,
                 port: port,
                 users: [{
+                    encryption: encryption, // 'none' in template usually comes first or is irrelevant order
                     id: id,
-                    encryption: encryption,
-                    flow: flow
+                    flow: flow || undefined // Only add flow if present
                 }]
             }];
         } else if (protocol === 'trojan') {
@@ -210,60 +210,51 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
             }];
         }
 
+        // Stream Settings
         const streamSettings: any = {
             network: net,
             security: security,
-            sockopt: {
-                tcpKeepAliveIdle: 100,
-                mark: 255
-            }
+            sockopt: {}
         };
 
-        // TCP Settings
+        // TCP
         if (net === 'tcp' && type === 'http') {
              streamSettings.tcpSettings = {
                  header: {
                      type: 'http',
                      request: {
-                         headers: {
-                             Host: [host]
-                         },
+                         headers: { Host: [host] },
                          path: [path]
                      }
                  }
              };
         }
 
-        // WS Settings
+        // WS
         if (net === 'ws') {
             streamSettings.wsSettings = {
-                path: path,
-                headers: {
-                    Host: host
-                }
+                host: host, // Template uses 'host' not headers.Host
+                path: path
             };
         }
 
-        // GRPC Settings
+        // GRPC
         if (net === 'grpc') {
             streamSettings.grpcSettings = {
                 serviceName: path,
-                multiMode: false // defaults
+                multiMode: false
             };
         }
 
-        // TLS / Reality Settings
+        // TLS
         if (security === 'tls') {
             streamSettings.tlsSettings = {
-                allowInsecure: options.allowInsecure,
-                serverName: sni,
-                fingerprint: fingerprint || 'chrome',
                 alpn: alpn,
-                show: false
+                fingerprint: fingerprint || 'chrome',
+                serverName: sni
             };
         } else if (security === 'reality') {
             streamSettings.realitySettings = {
-                show: false,
                 fingerprint: fingerprint || 'chrome',
                 serverName: sni,
                 publicKey: pbk,
@@ -272,141 +263,107 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
             };
         }
 
-        // Mux (Matches Template: enabled: true, concurrency: null if enabled)
-        // We use 8 as a safe default for 'true', or keep standard behavior.
-        const mux = options.enableMux ? {
-            enabled: true,
-            concurrency: options.muxConcurrency > 0 ? options.muxConcurrency : null
-        } : { enabled: false, concurrency: null }; 
-        // Note: Template had concurrency: null. Xray usually wants -1 or int. 
-        // If mux is disabled, valid config usually needs enabled: false.
-
-        // Fragment Logic (The Key Part)
-        // If Fragment is enabled, we set dialerProxy on the main outbound
-        // and create a secondary outbound with tag "fragment".
+        // Fragment Logic (Dialer Proxy)
         if (options.enableFragment && (security === 'tls' || security === 'reality')) {
             streamSettings.sockopt.dialerProxy = "fragment";
         }
 
-        const proxyOutbound = {
-            tag: "proxy",
+        const proxyOutbound: any = {
+            mux: {
+                concurrency: options.enableMux ? (options.muxConcurrency > 0 ? options.muxConcurrency : 8) : 8,
+                enabled: options.enableMux
+            },
             protocol: protocol,
             settings: proxySettings,
             streamSettings: streamSettings,
-            mux: mux
+            tag: "proxy"
         };
 
-        // --- 4. Build Outbound List ---
+        // --- 4. Build Outbounds Array ---
         const outbounds: any[] = [proxyOutbound];
 
-        // Add Fragment Outbound if needed (Matching template)
-        outbounds.push({
-            tag: "fragment",
-            protocol: "freedom",
-            settings: {
-                fragment: options.enableFragment ? {
-                    packets: "tlshello", // Template fixed value
-                    length: options.fragmentLength,
-                    interval: options.fragmentInterval
-                } : undefined
-            },
-            streamSettings: {
-                sockopt: {
-                    TcpNoDelay: true, // PascalCase as per user template
-                    tcpKeepAliveIdle: 100,
-                    mark: 255
-                }
-            }
-        });
-
-        // Add Direct and Block
-        outbounds.push({
-            tag: "direct",
-            protocol: "freedom",
-            settings: {}
-        });
-
-        outbounds.push({
-            tag: "block",
-            protocol: "blackhole",
-            settings: {
-                response: {
-                    type: "http"
-                }
-            }
-        });
-
-        // --- 5. Construct Final JSON (Strictly matching template) ---
-        return {
-            log: {
-                access: "",
-                error: "",
-                loglevel: "warning"
-            },
-            inbounds: [
-                {
-                    tag: "socks",
-                    port: 10808,
-                    listen: "127.0.0.1",
-                    protocol: "socks",
-                    sniffing: {
-                        enabled: true,
-                        destOverride: ["http", "tls"],
-                        routeOnly: false
-                    },
-                    settings: {
-                        auth: "noauth",
-                        udp: true,
-                        allowTransparent: false
+        if (options.enableFragment) {
+            outbounds.push({
+                protocol: "freedom",
+                settings: {
+                    fragment: {
+                        interval: options.fragmentInterval,
+                        length: options.fragmentLength
                     }
                 },
+                streamSettings: {
+                    sockopt: {
+                        penetrate: true
+                    }
+                },
+                tag: "fragment"
+            });
+        }
+
+        outbounds.push({ protocol: "freedom", tag: "direct" });
+        outbounds.push({ protocol: "blackhole", tag: "block" });
+
+        // --- 5. Final JSON Structure (Strict Match) ---
+        return {
+            dns: {
+                hosts: {
+                    "dns.google": ["8.8.8.8", "8.8.4.4"]
+                },
+                servers: [
+                    "fakedns",
+                    "https://dns.google/dns-query"
+                ]
+            },
+            fakedns: [
                 {
-                    tag: "http",
-                    port: 10809,
+                    ipPool: "198.20.0.0/15",
+                    poolSize: 128
+                },
+                {
+                    ipPool: "fc00::/64",
+                    poolSize: 128
+                }
+            ],
+            inbounds: [
+                {
                     listen: "127.0.0.1",
-                    protocol: "http",
-                    sniffing: {
-                        enabled: true,
-                        destOverride: ["http", "tls"],
-                        routeOnly: false
-                    },
+                    port: 1080,
+                    protocol: "socks",
                     settings: {
                         auth: "noauth",
-                        udp: true,
-                        allowTransparent: false
-                    }
+                        udp: true
+                    },
+                    sniffing: {
+                        destOverride: ["http", "tls", "quic"],
+                        enabled: true,
+                        routeOnly: true
+                    },
+                    tag: "socks"
                 }
             ],
             outbounds: outbounds,
             routing: {
-                domainStrategy: "AsIs",
+                domainMatcher: "hybrid",
+                domainStrategy: "IPIfNonMatch",
                 rules: [
                     {
-                        type: "field",
-                        inboundTag: ["api"],
-                        outboundTag: "api",
-                        enabled: true
-                    },
-                    {
-                        id: "5465425548310166497",
-                        type: "field",
+                        domain: ["geosite:category-ir", "regexp:.*\\.ir$"],
+                        domainMatcher: "hybrid",
+                        ip: ["geoip:ir", "geoip:private"],
+                        network: "TCP, UDP, HTTP, HTTPS, SSH, SMTP, SNMP, NTP, FTP, POP3, IMAP, Telnet",
                         outboundTag: "direct",
-                        domain: ["domain:ir", "geosite:cn"],
-                        enabled: true
+                        type: "field"
                     },
                     {
-                        id: "5425034033205580637",
-                        type: "field",
-                        outboundTag: "direct",
-                        ip: ["geoip:private", "geoip:cn", "geoip:ir"],
-                        enabled: true
-                    },
-                    {
-                        id: "5627785659655799759",
-                        type: "field",
-                        port: "0-65535",
-                        outboundTag: "proxy",
-                        enabled: true
+                        domain: [
+                            "geosite:category-ads-all", "geosite:category-ads", "geosite:yahoo-ads",
+                            "geosite:spotify-ads", "geosite:google-ads", "geosite:apple-ads",
+                            "geosite:amazon-ads", "geosite:adobe-ads"
+                        ],
+                        domainMatcher: "hybrid",
+                        network: "TCP, UDP, HTTP, HTTPS, SSH, SMTP, SNMP, NTP, FTP, POP3, IMAP, Telnet",
+                        outboundTag: "block",
+                        type: "field"
                     }
                 ]
             }
