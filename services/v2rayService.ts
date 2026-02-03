@@ -54,11 +54,29 @@ const getHostFromVmess = (link: string): string | null => {
 
 const getHostFromUrl = (link: string): string | null => {
     try {
+        // Handle SSR
         if (link.startsWith('ssr://')) {
              const b64 = link.replace('ssr://', '').split('/')[0];
              const decoded = safeB64Decode(b64);
              return decoded.split(':')[0] || null;
         }
+
+        // Handle Legacy SS (Base64 encoded without @)
+        if (link.startsWith('ss://') && !link.includes('@') && !link.includes('?')) {
+            const hashIndex = link.indexOf('#');
+            const b64 = link.substring(5, hashIndex > -1 ? hashIndex : undefined);
+            try {
+                const decoded = safeBase64UrlDecode(b64);
+                // decoded format: method:password@ip:port
+                if (decoded.includes('@')) {
+                   const parts = decoded.split('@');
+                   const addressPart = parts[parts.length - 1]; // ip:port
+                   return addressPart.split(':')[0];
+                }
+            } catch (e) {}
+        }
+
+        // Handle Standard VLESS, Trojan, SS (user:pass@host:port)
         const url = new URL(link);
         return url.hostname;
     } catch { return null; }
@@ -73,26 +91,25 @@ const generateNewAlias = (
 ): string => {
     const parts: string[] = [];
 
-    // 1. Add Location Info (Flag + Country ONLY - Removed City)
+    // 1. Add Location Info (Flag + Country)
     if (location) {
         parts.push(location.flag);
         if (location.country) parts.push(location.country);
-        // City removed as per request
     }
 
-    // 2. Add Custom Base Name (User Defined or Default "VS")
+    // 2. Add Custom Base Name
     const baseName = options.customBaseName && options.customBaseName.trim() !== ''
         ? options.customBaseName.trim()
         : 'VS';
     parts.push(baseName);
 
-    // 3. Add Index (Just the number as requested)
+    // 3. Add Index
     parts.push(`${index + 1}`);
 
     return parts.join(' ');
 };
 
-// Process VMess Link (Legacy Base64 Mode)
+// Process VMess Link
 const processVmess = (link: string, options: ProcessingOptions, index: number, loc: LocationData | undefined): string => {
   try {
     const b64Part = link.replace('vmess://', '');
