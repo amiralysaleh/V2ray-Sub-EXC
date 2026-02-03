@@ -4,7 +4,7 @@ import { createOrUpdateGist } from './services/githubService';
 import { generateSmartDescription } from './services/geminiService';
 import { Toggle } from './components/Toggle';
 import { ProcessingOptions, LogEntry } from './types';
-import { Activity, Link as LinkIcon, Terminal, AlertTriangle, Download, GitMerge, RefreshCw, Trash2, Settings2, Globe, Cloud, Network, Search, Plus, Save, PenTool, X, FileJson, FileText } from 'lucide-react';
+import { Activity, Link as LinkIcon, Terminal, AlertTriangle, Download, GitMerge, RefreshCw, Trash2, Settings2, Globe, Cloud, Network, Search, Plus, Save, PenTool, X } from 'lucide-react';
 
 const App: React.FC = () => {
   const githubToken = (import.meta as any).env?.VITE_GITHUB_TOKEN || '';
@@ -34,14 +34,8 @@ const App: React.FC = () => {
     addLocationFlag: true, // Master switch for GeoIP Naming
     enableCDNIP: false,
     customCDN: '',
-    customBaseName: '',
-    outputFormat: 'base64'
+    customBaseName: ''
   });
-
-  // Handle format change
-  const handleFormatChange = (format: 'base64' | 'json') => {
-      setOptions(prev => ({ ...prev, outputFormat: format }));
-  };
 
   // Helper to extract Gist ID robustly
   const extractGistId = (url: string): string | null => {
@@ -140,7 +134,7 @@ const App: React.FC = () => {
     const actionType = isUpdate ? 'UPDATE' : 'CREATE';
 
     addLog('info', `شروع عملیات: ${actionType === 'UPDATE' ? `بروزرسانی Gist (${gistId.substring(0,6)}...)` : 'ساخت Gist جدید'}...`);
-    addLog('info', `فایل هدف: ${filename} | فرمت: ${options.outputFormat.toUpperCase()}`);
+    addLog('info', `فایل هدف: ${filename}`);
 
     if (options.addLocationFlag) {
         addLog('info', 'در حال تشخیص موقعیت جغرافیایی و نام‌گذاری مجدد سرورها...');
@@ -221,33 +215,6 @@ const App: React.FC = () => {
             </h2>
             <div className="space-y-1 divide-y divide-gray-800/50">
               
-               {/* Output Format */}
-              <div className="py-3">
-                 <div className="flex items-center gap-2 mb-2 text-sm font-bold text-gray-200">
-                     <FileJson size={16} className="text-orange-400"/>
-                     Output Format
-                 </div>
-                 <div className="flex gap-2 p-1 bg-gray-950 rounded-lg border border-gray-800">
-                     <button 
-                        onClick={() => handleFormatChange('base64')}
-                        className={`flex-1 py-1.5 px-3 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 ${options.outputFormat === 'base64' ? 'bg-primary-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
-                     >
-                         <FileText size={12}/> Standard (Base64)
-                     </button>
-                     <button 
-                        onClick={() => handleFormatChange('json')}
-                        className={`flex-1 py-1.5 px-3 rounded-md text-xs font-bold transition-all flex items-center justify-center gap-2 ${options.outputFormat === 'json' ? 'bg-orange-600 text-white shadow-lg' : 'text-gray-400 hover:text-gray-200'}`}
-                     >
-                         <FileJson size={12}/> Xray JSON
-                     </button>
-                 </div>
-                 {options.outputFormat === 'json' && (
-                     <p className="text-[10px] text-orange-400 mt-2 leading-relaxed">
-                         Generates a <b>Full Xray Config</b> per line (Raw Text). Compatible with clients that require full structure (Inbounds/Routing).
-                     </p>
-                 )}
-              </div>
-
               {/* Naming Settings */}
               <div className="py-3">
                  <div className="flex items-center gap-2 mb-2 text-sm font-bold text-gray-200">
