@@ -114,7 +114,6 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
         let pbk = '';
         let sid = '';
         let spx = '';
-        let alias = '';
         
         // Parsing Logic
         if (link.startsWith('vmess://')) {
@@ -122,7 +121,6 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
             const b64 = link.replace('vmess://', '');
             const config = JSON.parse(safeB64Decode(b64));
             
-            alias = generateNewAlias(config.ps, index, loc, options);
             address = config.add;
             port = parseInt(config.port);
             id = config.id;
@@ -138,7 +136,6 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
         } else if (link.startsWith('vless://') || link.startsWith('trojan://')) {
             protocol = link.startsWith('vless://') ? 'vless' : 'trojan';
             const url = new URL(link);
-            alias = generateNewAlias(decodeURIComponent(url.hash.slice(1)), index, loc, options);
             
             address = url.hostname;
             port = parseInt(url.port);
@@ -275,11 +272,14 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
             };
         }
 
-        // Mux
+        // Mux (Matches Template: enabled: true, concurrency: null if enabled)
+        // We use 8 as a safe default for 'true', or keep standard behavior.
         const mux = options.enableMux ? {
             enabled: true,
-            concurrency: options.muxConcurrency
-        } : { enabled: true, concurrency: null }; // Template defaults
+            concurrency: options.muxConcurrency > 0 ? options.muxConcurrency : null
+        } : { enabled: false, concurrency: null }; 
+        // Note: Template had concurrency: null. Xray usually wants -1 or int. 
+        // If mux is disabled, valid config usually needs enabled: false.
 
         // Fragment Logic (The Key Part)
         // If Fragment is enabled, we set dialerProxy on the main outbound
@@ -305,14 +305,14 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
             protocol: "freedom",
             settings: {
                 fragment: options.enableFragment ? {
-                    packets: "tlshello",
+                    packets: "tlshello", // Template fixed value
                     length: options.fragmentLength,
                     interval: options.fragmentInterval
                 } : undefined
             },
             streamSettings: {
                 sockopt: {
-                    TcpNoDelay: true,
+                    TcpNoDelay: true, // PascalCase as per user template
                     tcpKeepAliveIdle: 100,
                     mark: 255
                 }
@@ -336,7 +336,7 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
             }
         });
 
-        // --- 5. Construct Final JSON (Exactly matching template) ---
+        // --- 5. Construct Final JSON (Strictly matching template) ---
         return {
             log: {
                 access: "",
@@ -409,10 +409,7 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
                         enabled: true
                     }
                 ]
-            },
-            // Note: remarks is not in standard Xray Config, but clients like v2rayNG 
-            // read top-level 'remarks' or 'ps' field from a custom JSON import.
-            remarks: alias 
+            }
         };
 
     } catch (e) {
