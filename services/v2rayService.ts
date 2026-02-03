@@ -92,174 +92,336 @@ const generateNewAlias = (
     return parts.join(' ');
 };
 
-// --- Xray JSON Converter Helpers ---
+// --- Xray JSON Builder ---
 
-// Converts any link to a standard Xray Outbound JSON object
-const convertLinkToXrayOutbound = (link: string, options: ProcessingOptions, index: number, loc: LocationData | undefined): any | null => {
+const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: number, loc: LocationData | undefined): any | null => {
     try {
+        // --- 1. Parse Link Details ---
         let protocol = '';
-        let settings = {};
-        let streamSettings: any = { network: 'tcp', security: 'none' };
-        let tag = '';
-        let mux = options.enableMux ? { enabled: true, concurrency: options.muxConcurrency } : undefined;
-
-        // Apply Fragment via sockopt if enabled
-        const sockopt: any = {};
-        if (options.enableFragment) {
-            sockopt.fragment = {
-                packets: "tlshello",
-                length: options.fragmentLength,
-                interval: options.fragmentInterval
-            };
-        }
-        // Always attach sockopt to streamSettings later
-
+        let address = '';
+        let port = 0;
+        let id = '';
+        let security = 'none';
+        let net = 'tcp';
+        let type = 'none'; // header type
+        let host = '';
+        let path = '';
+        let sni = '';
+        let alpn: string[] | undefined = undefined;
+        let fingerprint = '';
+        let flow = '';
+        let encryption = 'none';
+        let pbk = '';
+        let sid = '';
+        let spx = '';
+        let alias = '';
+        
+        // Parsing Logic
         if (link.startsWith('vmess://')) {
             protocol = 'vmess';
             const b64 = link.replace('vmess://', '');
             const config = JSON.parse(safeB64Decode(b64));
             
-            tag = generateNewAlias(config.ps, index, loc, options);
+            alias = generateNewAlias(config.ps, index, loc, options);
+            address = config.add;
+            port = parseInt(config.port);
+            id = config.id;
+            security = config.tls || 'none';
+            net = config.net || 'tcp';
+            type = config.type || 'none';
+            host = config.host || config.add;
+            path = config.path || '/';
+            sni = config.sni || config.host || config.add;
+            fingerprint = config.fp || '';
             
-            // Map VMess fields to Xray
-            const address = (options.enableCDNIP && options.customCDN && (config.net === 'ws' || config.net === 'grpc')) 
-                            ? options.customCDN 
-                            : config.add;
-            const port = parseInt(config.port);
-            
-            settings = {
-                vnext: [{
-                    address: address,
-                    port: port,
-                    users: [{
-                        id: config.id,
-                        alterId: parseInt(config.aid || '0'),
-                        security: config.scy || 'auto'
-                    }]
-                }]
-            };
-
-            streamSettings.network = config.net || 'tcp';
-            streamSettings.security = config.tls || 'none';
-            
-            const host = config.host || config.add;
-            const sni = config.sni || config.host || config.add;
-
-            if (config.net === 'ws') {
-                streamSettings.wsSettings = {
-                    path: config.path || '/',
-                    headers: { Host: host }
-                };
-            } else if (config.net === 'grpc') {
-                streamSettings.grpcSettings = {
-                    serviceName: config.path || ''
-                };
-            }
-
-            if (config.tls === 'tls') {
-                streamSettings.tlsSettings = {
-                    serverName: sni,
-                    allowInsecure: options.allowInsecure,
-                    alpn: options.enableALPN ? ['h2', 'http/1.1'] : undefined,
-                    fingerprint: config.fp || undefined
-                };
-            }
-
+            // AlterId is deprecated in newer Xray, usually 0
         } else if (link.startsWith('vless://') || link.startsWith('trojan://')) {
-            const url = new URL(link);
             protocol = link.startsWith('vless://') ? 'vless' : 'trojan';
-            tag = generateNewAlias(decodeURIComponent(url.hash.slice(1)), index, loc, options);
+            const url = new URL(link);
+            alias = generateNewAlias(decodeURIComponent(url.hash.slice(1)), index, loc, options);
             
-            const originalHost = url.hostname;
+            address = url.hostname;
+            port = parseInt(url.port);
+            id = url.username; // UUID or Password
+            
             const params = url.searchParams;
-            const net = params.get('type') || params.get('mode') || 'tcp';
-            const security = params.get('security') || 'none';
+            security = params.get('security') || 'none';
+            net = params.get('type') || params.get('mode') || 'tcp';
+            type = params.get('headerType') || 'none';
             
-            const useCDN = options.enableCDNIP && options.customCDN && (net === 'ws' || net === 'grpc');
-            const address = useCDN ? options.customCDN : originalHost;
-            const port = parseInt(url.port);
-
-            // User Settings
-            if (protocol === 'vless') {
-                settings = {
-                    vnext: [{
-                        address: address,
-                        port: port,
-                        users: [{
-                            id: url.username,
-                            encryption: params.get('encryption') || 'none',
-                            level: 0
-                        }]
-                    }]
-                };
-            } else {
-                settings = {
-                    servers: [{
-                        address: address,
-                        port: port,
-                        password: url.username,
-                        level: 0
-                    }]
-                };
-            }
-
-            streamSettings.network = net;
-            streamSettings.security = security;
+            host = params.get('host') || address;
+            path = params.get('path') || params.get('serviceName') || '/';
+            sni = params.get('sni') || host;
+            fingerprint = params.get('fp') || '';
+            flow = params.get('flow') || '';
+            encryption = params.get('encryption') || 'none';
             
-            const host = params.get('host') || originalHost;
-            const sni = params.get('sni') || host;
-            const path = params.get('path') || params.get('serviceName') || '/';
-
-            if (net === 'ws') {
-                streamSettings.wsSettings = {
-                    path: path,
-                    headers: { Host: host }
-                };
-            } else if (net === 'grpc') {
-                streamSettings.grpcSettings = {
-                    serviceName: path
-                };
-            }
-
-            if (security === 'tls') {
-                streamSettings.tlsSettings = {
-                    serverName: sni,
-                    allowInsecure: options.allowInsecure,
-                    alpn: options.enableALPN ? ['h2', 'http/1.1'] : undefined,
-                    fingerprint: params.get('fp') || undefined
-                };
-            } else if (security === 'reality') {
-                streamSettings.realitySettings = {
-                    serverName: sni,
-                    publicKey: params.get('pbk'),
-                    shortId: params.get('sid'),
-                    fingerprint: params.get('fp') || 'chrome',
-                    spiderX: params.get('spx') || ''
-                };
-            }
-        } else if (link.startsWith('ss://')) {
-             return null; 
+            // Reality specific
+            pbk = params.get('pbk') || '';
+            sid = params.get('sid') || '';
+            spx = params.get('spx') || '';
         } else {
-            return null; 
+            return null; // Skip unsupported
         }
 
-        // Attach Sockopt
-        streamSettings.sockopt = sockopt;
+        // --- 2. Apply Customizations (CDN, ALPN, etc.) ---
+        
+        // CDN Override
+        if (options.enableCDNIP && options.customCDN && (net === 'ws' || net === 'grpc')) {
+             // Keep SNI/Host as original, change address to CDN
+             if (!host) host = address;
+             if (!sni && (security === 'tls' || security === 'reality')) sni = address;
+             address = options.customCDN;
+        }
 
-        return {
-            tag: tag,
+        // ALPN
+        if (options.enableALPN && (security === 'tls' || security === 'reality')) {
+            alpn = ['h2', 'http/1.1'];
+        }
+
+        // --- 3. Build "Proxy" Outbound ---
+        
+        const proxySettings: any = {};
+        
+        if (protocol === 'vmess') {
+            proxySettings.vnext = [{
+                address: address,
+                port: port,
+                users: [{
+                    id: id,
+                    alterId: 0,
+                    security: 'auto',
+                    encryption: encryption
+                }]
+            }];
+        } else if (protocol === 'vless') {
+            proxySettings.vnext = [{
+                address: address,
+                port: port,
+                users: [{
+                    id: id,
+                    encryption: encryption,
+                    flow: flow
+                }]
+            }];
+        } else if (protocol === 'trojan') {
+            proxySettings.servers = [{
+                address: address,
+                port: port,
+                password: id,
+                level: 0
+            }];
+        }
+
+        const streamSettings: any = {
+            network: net,
+            security: security,
+            sockopt: {
+                tcpKeepAliveIdle: 100,
+                mark: 255
+            }
+        };
+
+        // TCP Settings
+        if (net === 'tcp' && type === 'http') {
+             streamSettings.tcpSettings = {
+                 header: {
+                     type: 'http',
+                     request: {
+                         headers: {
+                             Host: [host]
+                         },
+                         path: [path]
+                     }
+                 }
+             };
+        }
+
+        // WS Settings
+        if (net === 'ws') {
+            streamSettings.wsSettings = {
+                path: path,
+                headers: {
+                    Host: host
+                }
+            };
+        }
+
+        // GRPC Settings
+        if (net === 'grpc') {
+            streamSettings.grpcSettings = {
+                serviceName: path,
+                multiMode: false // defaults
+            };
+        }
+
+        // TLS / Reality Settings
+        if (security === 'tls') {
+            streamSettings.tlsSettings = {
+                allowInsecure: options.allowInsecure,
+                serverName: sni,
+                fingerprint: fingerprint || 'chrome',
+                alpn: alpn,
+                show: false
+            };
+        } else if (security === 'reality') {
+            streamSettings.realitySettings = {
+                show: false,
+                fingerprint: fingerprint || 'chrome',
+                serverName: sni,
+                publicKey: pbk,
+                shortId: sid,
+                spiderX: spx
+            };
+        }
+
+        // Mux
+        const mux = options.enableMux ? {
+            enabled: true,
+            concurrency: options.muxConcurrency,
+            xudpConcurrency: 8,
+            xudpProxyUDP443: "reject"
+        } : { enabled: false, concurrency: -1 };
+
+        // Fragment Logic (The Key Part)
+        // If Fragment is enabled, we set dialerProxy on the main outbound
+        // and create a secondary outbound with tag "fragment".
+        if (options.enableFragment && (security === 'tls' || security === 'reality')) {
+            streamSettings.sockopt.dialerProxy = "fragment";
+        }
+
+        const proxyOutbound = {
+            tag: "proxy",
             protocol: protocol,
-            settings: settings,
+            settings: proxySettings,
             streamSettings: streamSettings,
             mux: mux
         };
 
+        // --- 4. Build Outbound List ---
+        const outbounds: any[] = [proxyOutbound];
+
+        // Add Fragment Outbound if needed
+        if (options.enableFragment) {
+            outbounds.push({
+                tag: "fragment",
+                protocol: "freedom",
+                settings: {
+                    fragment: {
+                        packets: "tlshello",
+                        length: options.fragmentLength,
+                        interval: options.fragmentInterval
+                    }
+                },
+                streamSettings: {
+                    sockopt: {
+                        TcpNoDelay: true,
+                        tcpKeepAliveIdle: 100,
+                        mark: 255
+                    }
+                }
+            });
+        }
+
+        // Add Direct and Block
+        outbounds.push({
+            tag: "direct",
+            protocol: "freedom",
+            settings: {}
+        });
+
+        outbounds.push({
+            tag: "block",
+            protocol: "blackhole",
+            settings: {
+                response: {
+                    type: "http"
+                }
+            }
+        });
+
+        // --- 5. Construct Final JSON ---
+        return {
+            remarks: alias, // Top level remarks for client naming
+            log: {
+                access: "",
+                error: "",
+                loglevel: "warning"
+            },
+            inbounds: [
+                {
+                    tag: "socks",
+                    port: 10808,
+                    listen: "127.0.0.1",
+                    protocol: "socks",
+                    sniffing: {
+                        enabled: true,
+                        destOverride: ["http", "tls"],
+                        routeOnly: false
+                    },
+                    settings: {
+                        auth: "noauth",
+                        udp: true,
+                        allowTransparent: false
+                    }
+                },
+                {
+                    tag: "http",
+                    port: 10809,
+                    listen: "127.0.0.1",
+                    protocol: "http",
+                    sniffing: {
+                        enabled: true,
+                        destOverride: ["http", "tls"],
+                        routeOnly: false
+                    },
+                    settings: {
+                        auth: "noauth",
+                        udp: true,
+                        allowTransparent: false
+                    }
+                }
+            ],
+            outbounds: outbounds,
+            routing: {
+                domainStrategy: "AsIs",
+                rules: [
+                    {
+                        type: "field",
+                        inboundTag: ["api"],
+                        outboundTag: "api",
+                        enabled: true
+                    },
+                    {
+                        id: "5465425548310166497",
+                        type: "field",
+                        outboundTag: "direct",
+                        domain: ["domain:ir", "geosite:cn"],
+                        enabled: true
+                    },
+                    {
+                        id: "5425034033205580637",
+                        type: "field",
+                        outboundTag: "direct",
+                        ip: ["geoip:private", "geoip:cn", "geoip:ir"],
+                        enabled: true
+                    },
+                    {
+                        id: "5627785659655799759",
+                        type: "field",
+                        port: "0-65535",
+                        outboundTag: "proxy",
+                        enabled: true
+                    }
+                ]
+            }
+        };
+
     } catch (e) {
-        console.error("Error converting link to JSON", e);
+        console.error("Error building JSON", e);
         return null;
     }
 };
-
 
 // Process VMess Link (Legacy Base64 Mode)
 const processVmess = (link: string, options: ProcessingOptions, index: number, loc: LocationData | undefined): string => {
@@ -415,72 +577,7 @@ export const processConfigs = async (input: string, options: ProcessingOptions):
           
           const loc = (host && hostLocationMap[host]) ? hostLocationMap[host] : undefined;
           
-          const outbound = convertLinkToXrayOutbound(line, options, index, loc);
-          if (!outbound) return null;
-
-          // Capture the Alias/Name generated for this outbound
-          const remarkName = outbound.tag; 
-
-          // Enforce standard tag "proxy" for the main outbound as per user request example
-          outbound.tag = "proxy";
-
-          // Construct the Full Xray Configuration Object
-          return {
-              log: {
-                  access: "",
-                  error: "",
-                  loglevel: "warning"
-              },
-              inbounds: [
-                  {
-                      listen: "127.0.0.1",
-                      port: 1080,
-                      protocol: "socks",
-                      settings: {
-                          auth: "noauth",
-                          udp: true
-                      },
-                      sniffing: {
-                          destOverride: ["http", "tls", "quic"],
-                          enabled: true,
-                          routeOnly: true
-                      },
-                      tag: "socks"
-                  }
-              ],
-              outbounds: [
-                  outbound, // The generated VLESS/VMess outbound
-                  {
-                      protocol: "freedom",
-                      tag: "direct"
-                  },
-                  {
-                      protocol: "blackhole",
-                      tag: "block"
-                  }
-              ],
-              dns: {
-                  servers: [
-                      "1.1.1.1",
-                      "8.8.8.8"
-                  ]
-              },
-              fakedns: [
-                  {
-                      ipPool: "198.20.0.0/15",
-                      poolSize: 128
-                  },
-                  {
-                      ipPool: "fc00::/64",
-                      poolSize: 128
-                  }
-              ],
-              routing: {
-                  domainStrategy: "AsIs",
-                  rules: []
-              },
-              remarks: remarkName // Use the generated name here
-          };
+          return buildFullXrayConfig(line, options, index, loc);
       }).filter(o => o !== null);
 
       // Return Line-Delimited JSON of FULL CONFIGS
