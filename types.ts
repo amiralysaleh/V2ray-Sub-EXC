@@ -1,3 +1,4 @@
+
 export interface GistFile {
   filename: string;
   content: string;
@@ -26,7 +27,6 @@ export interface ProcessingOptions {
   enableCDNIP: boolean;
   customCDN: string;
   customBaseName: string;
-  outputFormat: 'base64' | 'json'; // New field
 }
 
 export interface LogEntry {
