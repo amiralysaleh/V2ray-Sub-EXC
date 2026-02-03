@@ -278,10 +278,8 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
         // Mux
         const mux = options.enableMux ? {
             enabled: true,
-            concurrency: options.muxConcurrency,
-            xudpConcurrency: 8,
-            xudpProxyUDP443: "reject"
-        } : { enabled: false, concurrency: -1 };
+            concurrency: options.muxConcurrency
+        } : { enabled: true, concurrency: null }; // Template defaults
 
         // Fragment Logic (The Key Part)
         // If Fragment is enabled, we set dialerProxy on the main outbound
@@ -301,27 +299,25 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
         // --- 4. Build Outbound List ---
         const outbounds: any[] = [proxyOutbound];
 
-        // Add Fragment Outbound if needed
-        if (options.enableFragment) {
-            outbounds.push({
-                tag: "fragment",
-                protocol: "freedom",
-                settings: {
-                    fragment: {
-                        packets: "tlshello",
-                        length: options.fragmentLength,
-                        interval: options.fragmentInterval
-                    }
-                },
-                streamSettings: {
-                    sockopt: {
-                        TcpNoDelay: true,
-                        tcpKeepAliveIdle: 100,
-                        mark: 255
-                    }
+        // Add Fragment Outbound if needed (Matching template)
+        outbounds.push({
+            tag: "fragment",
+            protocol: "freedom",
+            settings: {
+                fragment: options.enableFragment ? {
+                    packets: "tlshello",
+                    length: options.fragmentLength,
+                    interval: options.fragmentInterval
+                } : undefined
+            },
+            streamSettings: {
+                sockopt: {
+                    TcpNoDelay: true,
+                    tcpKeepAliveIdle: 100,
+                    mark: 255
                 }
-            });
-        }
+            }
+        });
 
         // Add Direct and Block
         outbounds.push({
@@ -340,9 +336,8 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
             }
         });
 
-        // --- 5. Construct Final JSON ---
+        // --- 5. Construct Final JSON (Exactly matching template) ---
         return {
-            remarks: alias, // Top level remarks for client naming
             log: {
                 access: "",
                 error: "",
@@ -414,7 +409,10 @@ const buildFullXrayConfig = (link: string, options: ProcessingOptions, index: nu
                         enabled: true
                     }
                 ]
-            }
+            },
+            // Note: remarks is not in standard Xray Config, but clients like v2rayNG 
+            // read top-level 'remarks' or 'ps' field from a custom JSON import.
+            remarks: alias 
         };
 
     } catch (e) {
@@ -582,7 +580,10 @@ export const processConfigs = async (input: string, options: ProcessingOptions):
 
       // Return Line-Delimited JSON of FULL CONFIGS
       const jsonLines = fullConfigs.map(o => JSON.stringify(o)).join('\n');
-      return jsonLines;
+      
+      // IMPORTANT: Clients expect the subscription FILE itself to be Base64 encoded, 
+      // even if the contents are JSON objects. They decode the file, then read lines.
+      return safeB64Encode(jsonLines);
   }
 
   // 3. Standard Base64 Subscription Mode
