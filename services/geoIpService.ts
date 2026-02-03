@@ -4,7 +4,7 @@ export interface LocationData {
   city: string;
 }
 
-const CACHE_KEY = 'v2ray_geoip_full_cache_v2';
+const CACHE_KEY = 'v2ray_geoip_full_cache_v3'; // Incremented cache version
 
 // Helper to get cache from localStorage
 const getCache = (): Record<string, LocationData> => {
@@ -51,19 +51,25 @@ export const resolveLocation = async (host: string): Promise<LocationData | null
                 }
             } catch (dnsError) {
                 console.warn(`DNS lookup failed for ${host}`, dnsError);
+                // Continue with host if DNS fails (sometimes api handles domain)
             }
         }
 
         // 2. Get GeoIP using ipwho.is
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        const timeoutId = setTimeout(() => controller.abort(), 6000); // Increased timeout
         
-        // Add random param to avoid cache hits on the API side if needed
-        const geoRes = await fetch(`https://ipwho.is/${ip}?lang=en`, { signal: controller.signal });
+        const geoRes = await fetch(`https://ipwho.is/${ip}?lang=en`, { 
+            signal: controller.signal,
+            referrerPolicy: 'no-referrer' 
+        });
         clearTimeout(timeoutId);
         
         const geoData = await geoRes.json();
 
+        // CRITICAL CHECK: ensure 'success' is true. 
+        // If false, it means IP is private, reserved, or invalid. 
+        // Without this, ipwho.is might return the requester's info in some edge cases.
         if (geoData.success) {
             const data: LocationData = {
                 flag: getFlagEmoji(geoData.country_code),
@@ -72,6 +78,10 @@ export const resolveLocation = async (host: string): Promise<LocationData | null
             };
             updateCache(host, data); 
             return data;
+        } else {
+             // Cache a null-like result to avoid retrying bad IPs? 
+             // For now, we just return null so it doesn't get a flag.
+             return null;
         }
     } catch (e) {
         console.warn(`Failed to resolve location for ${host}`, e);
@@ -84,18 +94,18 @@ export const batchResolve = async (hosts: string[]): Promise<Record<string, Loca
     const uniqueHosts = [...new Set(hosts.filter(h => !!h))];
     const results: Record<string, LocationData> = {};
     
-    // Reduced batch size and added delay to avoid rate limits (which cause incorrect location data)
-    const BATCH_SIZE = 2;
+    // Batch size of 3 and delay of 1.2s to be very safe against Rate Limits
+    const BATCH_SIZE = 3;
     for (let i = 0; i < uniqueHosts.length; i += BATCH_SIZE) {
         const batch = uniqueHosts.slice(i, i + BATCH_SIZE);
         await Promise.all(batch.map(async (host) => {
-            // Small jitter
-            await new Promise(r => setTimeout(r, Math.random() * 300));
+            // Small jitter to prevent exact simultaneous hits
+            await new Promise(r => setTimeout(r, Math.random() * 500));
             const res = await resolveLocation(host);
             if (res) results[host] = res;
         }));
-        // Delay between batches
-        await new Promise(r => setTimeout(r, 800));
+        // Significant delay between batches to respect free API tiers
+        await new Promise(r => setTimeout(r, 1200));
     }
     return results;
 };
