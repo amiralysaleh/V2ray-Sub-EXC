@@ -238,10 +238,7 @@ const convertLinkToXrayOutbound = (link: string, options: ProcessingOptions, ind
                 };
             }
         } else if (link.startsWith('ss://')) {
-             // Basic SS support for JSON
-             // Parsing SS is complex due to various formats (legacy/SIP002)
-             // We'll skip deep implementation to keep it safe, or return basic
-             return null; // Skipping SS for JSON export for now to ensure stability
+             return null; 
         } else {
             return null; 
         }
@@ -409,20 +406,85 @@ export const processConfigs = async (input: string, options: ProcessingOptions):
       hostLocationMap = await batchResolve(hosts);
   }
 
-  // 2. JSON Export Mode (Universal Config - Line Delimited)
+  // 2. JSON Export Mode (Full Config Per Line)
   if (options.outputFormat === 'json') {
-      const outbounds = lines.map((line, index) => {
+      const fullConfigs = lines.map((line, index) => {
           let host: string | null = null;
           if (line.startsWith('vmess://')) host = getHostFromVmess(line);
           else host = getHostFromUrl(line);
           
           const loc = (host && hostLocationMap[host]) ? hostLocationMap[host] : undefined;
-          return convertLinkToXrayOutbound(line, options, index, loc);
+          
+          const outbound = convertLinkToXrayOutbound(line, options, index, loc);
+          if (!outbound) return null;
+
+          // Capture the Alias/Name generated for this outbound
+          const remarkName = outbound.tag; 
+
+          // Enforce standard tag "proxy" for the main outbound as per user request example
+          outbound.tag = "proxy";
+
+          // Construct the Full Xray Configuration Object
+          return {
+              log: {
+                  access: "",
+                  error: "",
+                  loglevel: "warning"
+              },
+              inbounds: [
+                  {
+                      listen: "127.0.0.1",
+                      port: 1080,
+                      protocol: "socks",
+                      settings: {
+                          auth: "noauth",
+                          udp: true
+                      },
+                      sniffing: {
+                          destOverride: ["http", "tls", "quic"],
+                          enabled: true,
+                          routeOnly: true
+                      },
+                      tag: "socks"
+                  }
+              ],
+              outbounds: [
+                  outbound, // The generated VLESS/VMess outbound
+                  {
+                      protocol: "freedom",
+                      tag: "direct"
+                  },
+                  {
+                      protocol: "blackhole",
+                      tag: "block"
+                  }
+              ],
+              dns: {
+                  servers: [
+                      "1.1.1.1",
+                      "8.8.8.8"
+                  ]
+              },
+              fakedns: [
+                  {
+                      ipPool: "198.20.0.0/15",
+                      poolSize: 128
+                  },
+                  {
+                      ipPool: "fc00::/64",
+                      poolSize: 128
+                  }
+              ],
+              routing: {
+                  domainStrategy: "AsIs",
+                  rules: []
+              },
+              remarks: remarkName // Use the generated name here
+          };
       }).filter(o => o !== null);
 
-      // Return Line-Delimited JSON (one compact JSON object per line)
-      // Per user request: Do NOT Base64 encode this output.
-      const jsonLines = outbounds.map(o => JSON.stringify(o)).join('\n');
+      // Return Line-Delimited JSON of FULL CONFIGS
+      const jsonLines = fullConfigs.map(o => JSON.stringify(o)).join('\n');
       return jsonLines;
   }
 
