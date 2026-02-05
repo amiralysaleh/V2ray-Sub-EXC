@@ -145,7 +145,7 @@ const App: React.FC = () => {
       const count = inputConfigs.split('\n').filter(l => l.trim()).length;
       const tehranTime = getTehranDate();
       
-      addLog('info', 'در حال تولید توضیحات هوشمند توسط Gemini...');
+      addLog('info', 'در حال تولید توضیحات');
       const desc = await generateSmartDescription(count, tehranTime);
       
       addLog('info', 'در حال ارسال به GitHub...');
